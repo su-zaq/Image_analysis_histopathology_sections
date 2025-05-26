@@ -1,0 +1,6 @@
+# Pythonのバイトコード
+__pycache__/
+*.py[cod]
+
+# 環境設定ファイル
+.env
