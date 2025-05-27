@@ -689,6 +689,9 @@ class Extraction:
                 if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
                     save_path = self.set_path(f'{self.save_image_path}val/exp{self.exp_num:04d}/val{self.val_num+1:02d}/epoch{epoch+1:02d}/')
                     self.save_image(img_path_list, save_path)
+                elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+                    save_path = self.set_path(f'{self.save_image_path}val/exp{self.exp_num:04d}/val{self.val_num+1:02d}/epoch{epoch+1:02d}/')
+                    self.save_image(img_path_list, save_path)
                 elif self.experiment_subject == 'both':
                     save_path = self.set_path(f'{self.save_membrane_image_path}val/exp{self.exp_num:04d}/val{self.val_num+1:02d}/epoch{epoch+1:02d}/')
                     save_nuclear_path = self.set_path(f'{self.save_nuclear_image_path}val/exp{self.exp_num:04d}/val{self.val_num+1:02d}/epoch{epoch+1:02d}/')
@@ -697,6 +700,9 @@ class Extraction:
             # Test
             img_path_list = self.pathological_specimen_folder_paths[self.test_num]
             if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                save_path = self.set_path(f'{self.save_image_path}test/exp{self.exp_num:04d}/test{self.val_num+1:02d}/epoch{epoch+1:02d}/')
+                self.save_image(img_path_list, save_path)
+            elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 save_path = self.set_path(f'{self.save_image_path}test/exp{self.exp_num:04d}/test{self.val_num+1:02d}/epoch{epoch+1:02d}/')
                 self.save_image(img_path_list, save_path)
             elif self.experiment_subject == 'both':
@@ -742,8 +748,14 @@ class Extraction:
                 img_path_list.append(f'{img_path}/x/{img_name}.png')
 
             self.model.eval()
-            img = Dataset_experiment_single.get_image(img_path_list, self.use_list, self.color, self.blend)
-            img = img.to(self.device)
+            if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear' or self.experiment_subject == 'both':  
+                img = Dataset_experiment_single.get_image(img_path_list, self.use_list, self.color, self.blend)
+                img = img.to(self.device)
+            elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+                img = Dataset_experiment_plus.get_image(img_path_list, self.use_list, self.experiment_subject, self.color, self.blend)
+                img = img.to(self.device)
+            else:
+                raise Exception(f'実験対象が不正です。experiment_subject : {self.experiment_subject}')
 
             with torch.no_grad():
                 #Pillowでの画像保存
@@ -771,6 +783,8 @@ class Extraction:
                 if isinstance(pred, list):
                     pred = pred[-1]
                 if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                    self.image_compression_save(pred, f'{save_path}{img_num}.png', divide=self.compress_rate)
+                elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                     self.image_compression_save(pred, f'{save_path}{img_num}.png', divide=self.compress_rate)
                 elif self.experiment_subject == 'both':
                     self.image_compression_save(pred, f'{save_path}{img_num}.png', divide=self.compress_rate, channel=0)
