@@ -93,6 +93,11 @@ class Extraction:
         # 実験パラメータ
         ## 比較対称になる条件
         ### 実験対象(膜, 核)
+        #### 膜のみ
+        #### 核のみ
+        #### 膜と核
+        #### 膜マスクを使用して核を抽出
+        #### 核マスクを使用して膜を抽出 
         self.experiment_subject = experiment_subject
         assert self.experiment_subject in ['membrane', 'nuclear', 'both', 'nuclear+', 'membrane+'], f'実験対象が不正です。experiment_subject : {self.experiment_subject}'
         
@@ -116,11 +121,13 @@ class Extraction:
             self.blend_particle_size = blend_particle_size
 
         ### 細胞膜の正解画像の膨張時にグラデーションにするか、しないか
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'both':
+        ### マスク学習時もグラデーションにするか，しないか
+        if self.experiment_subject == 'membrane' or self.experiment_subject == 'both' or self.experiment_subject == 'nuclear+' or self.experiment_subject == 'membrane+':
             self.gradation = gradation
 
         ### 細胞核の学習画像にDon't careを含むかどうか
-        if self.experiment_subject == 'nuclear' or self.experiment_subject == 'both' or self.experiment_subject == 'nuclear+':
+        ### マスク学習時はDon't careを含むかどうか
+        if self.experiment_subject == 'nuclear' or self.experiment_subject == 'both' or self.experiment_subject == 'nuclear+' or self.experiment_subject == 'membrane+':
             self.train_dont_care = train_dont_care
             self.care_rate = care_rate
             self.lower_ratio = lower_ratio
@@ -230,14 +237,14 @@ class Extraction:
         elif self.start_num == 0:
             raise Exception(self.default_path + '/log/exp.logは存在します。')
         ## 推論結果画像の保存先
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+        if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear' or self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
             self.save_image_path = self.set_path(self.default_path + f'/eval_data_{experiment_subject}/')
         elif self.experiment_subject == 'both':
             self.save_membrane_image_path = self.set_path(self.default_path + '/eval_data_membrane/')
             self.save_nuclear_image_path = self.set_path(self.default_path + '/eval_data_nuclear/')
 
         ####################################################################################################################
-        # 学習パラメータの記録
+        # 学習パラメータの記録  
         self.data_param_path = self.default_path + '/log/data_parm.json'
         if self.start_num == 0:
             self.save_json(self.data_param_path, vars(self))
@@ -265,6 +272,11 @@ class Extraction:
                     logger.info(folder_path+' の核の正解画像から学習用の正解を作成開始')
                     self.make_ans_img_nuclear(folder_path)
                 elif self.experiment_subject == 'both':
+                    logger.info(folder_path+' の細線化の正解画像から学習用の正解を作成開始')
+                    self.make_ans_img_membrane(folder_path)
+                    logger.info(folder_path+' の核の正解画像から学習用の正解を作成開始')
+                    self.make_ans_img_nuclear(folder_path)
+                elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                     logger.info(folder_path+' の細線化の正解画像から学習用の正解を作成開始')
                     self.make_ans_img_membrane(folder_path)
                     logger.info(folder_path+' の核の正解画像から学習用の正解を作成開始')
