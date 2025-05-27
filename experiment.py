@@ -46,7 +46,7 @@ from VitLib import (
 from VitLib_PyTorch.Loss import DiceLoss, FMeasureLoss, IoULoss, ReverseIoULoss
 from VitLib_PyTorch.Network import U_Net, Nested_U_Net
 
-from Dataset import Dataset_experiment_both, Dataset_experiment_single
+from Dataset import Dataset_experiment_both, Dataset_experiment_single, Dataset_experiment_plus
 
 # 撮像法名略称
 BRIGHT_FIELD = 'bf'
@@ -612,11 +612,15 @@ class Extraction:
             in_channels = 3
         elif self.use_list_length == 3:
             in_channels = sum(self.use_list) * 3
+        elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+            in_channels = sum(self.use_list) * 3 + 3    #マスク学習時はマスクのチャンネルを追加
         else:
             in_channels = sum(self.use_list)
 
         if self.use_Network == 'U-Net':
             if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                self.model = U_Net(in_channels, 1, bilinear=False).to(self.device, non_blocking=True)
+            elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 self.model = U_Net(in_channels, 1, bilinear=False).to(self.device, non_blocking=True)
             elif self.experiment_subject == 'both':
                 if self.use_other_channel:
@@ -627,6 +631,8 @@ class Extraction:
                 raise Exception(f'実験対象が不正です。experiment_subject : {self.experiment_subject}')
         elif self.use_Network == 'U-Net++':
             if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                self.model = Nested_U_Net(in_channels, 1, deepsupervision=self.deep_supervision).to(self.device, non_blocking=True)
+            elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 self.model = Nested_U_Net(in_channels, 1, deepsupervision=self.deep_supervision).to(self.device, non_blocking=True)
             elif self.experiment_subject == 'both':
                 if self.use_other_channel:
@@ -667,6 +673,8 @@ class Extraction:
         # Data loader
         if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
             self.dataloader = Dataset_experiment_single.get_dataloader(self.train_path_list, self.use_list, self.color, self.blend, batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True)
+        elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+            self.dataloader = Dataset_experiment_plus.get_dataloader(self.train_path_list, self.use_list, self.experiment_subject, self.color, self.blend, batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True)
         elif self.experiment_subject == 'both':
             self.dataloader = Dataset_experiment_both.get_dataloader(self.train_path_list, self.use_list, self.color, self.blend, self.use_other_channel, batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True)
 
