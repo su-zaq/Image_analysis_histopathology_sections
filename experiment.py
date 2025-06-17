@@ -611,9 +611,15 @@ class Extraction:
         if self.blend == 'alpha':
             in_channels = 3
         elif self.use_list_length == 3:
-            in_channels = sum(self.use_list) * 3
-        elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
-            in_channels = sum(self.use_list) * 3 + 3    #マスク学習時はマスクのチャンネルを追加
+            if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                in_channels = sum(self.use_list) * 3
+            elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+                in_channels = sum(self.use_list) * 3 + 3
+            elif self.experiment_subject == 'both':
+                if self.use_other_channel:
+                    in_channels = sum(self.use_list) * 3
+            else:
+                raise Exception(f'実験対象が不正です。experiment_subject : {self.experiment_subject}')
         else:
             in_channels = sum(self.use_list)
 

@@ -4,6 +4,13 @@
 # Distribution / packaging
 .Python
 build/
+.venv/
+Data/
+config/
+result/
+send_info_discord.py
+__pycache__/
+Dataser/__pycache__/
 develop-eggs/
 dist/
 downloads/
