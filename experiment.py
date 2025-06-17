@@ -505,6 +505,9 @@ class Extraction:
         create_directory(f'{save_folder_path}/{PHASE_CONTRAST}')
         if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
             create_directory(f'{save_folder_path}/y')
+        elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+            create_directory(f'{save_folder_path}/y_membrane')
+            create_directory(f'{save_folder_path}/y_nuclear')
         elif self.experiment_subject == 'both':
             create_directory(f'{save_folder_path}/y_membrane')
             create_directory(f'{save_folder_path}/y_nuclear')
@@ -533,6 +536,15 @@ class Extraction:
                     ans_img = cv2.imread(f'{img_path}/y_{self.experiment_subject}/ans.png', cv2.IMREAD_GRAYSCALE)
                 else:
                     ans_img = cv2.imread(f'{img_path}/y_{self.experiment_subject}/green.png', cv2.IMREAD_GRAYSCALE)
+            elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+                if self.gradation:
+                    ans_mem_img = cv2.imread(f'{img_path}/y_membrane/ans.png', cv2.IMREAD_GRAYSCALE)
+                else:
+                    ans_mem_img = cv2.imread(f'{img_path}/y_membrane/ans_nograd.png', cv2.IMREAD_GRAYSCALE)
+                if self.train_dont_care:
+                    ans_nuc_img = cv2.imread(f'{img_path}/y_nuclear/ans.png', cv2.IMREAD_GRAYSCALE)
+                else:
+                    ans_nuc_img = cv2.imread(f'{img_path}/y_nuclear/green.png', cv2.IMREAD_GRAYSCALE)
             elif self.experiment_subject == 'both':
                 if self.gradation:
                     ans_mem_img = cv2.imread(f'{img_path}/y_membrane/ans.png', cv2.IMREAD_GRAYSCALE)
@@ -550,6 +562,8 @@ class Extraction:
                     logger.info(f'{i}/{self.data_augmentation_num} の画像を作成中...')
                 if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
                     img_list = [bf_img, df_img, he_img, ans_img]
+                elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+                    img_list = [bf_img, df_img, he_img, ans_mem_img, ans_nuc_img]
                 elif self.experiment_subject == 'both':
                     img_list = [bf_img, df_img, he_img, ans_mem_img, ans_nuc_img]
                 else:
@@ -565,6 +579,9 @@ class Extraction:
                 cv2.imwrite(f'{save_folder_path}/{PHASE_CONTRAST}/{img_num:05d}.png', img_list[2])
                 if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
                     cv2.imwrite(f'{save_folder_path}/y/{img_num:05d}.png', img_list[3])
+                elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+                    cv2.imwrite(f'{save_folder_path}/y_membrane/{img_num:05d}.png', img_list[3])
+                    cv2.imwrite(f'{save_folder_path}/y_nuclear/{img_num:05d}.png', img_list[4])
                 elif self.experiment_subject == 'both':
                     cv2.imwrite(f'{save_folder_path}/y_membrane/{img_num:05d}.png', img_list[3])
                     cv2.imwrite(f'{save_folder_path}/y_nuclear/{img_num:05d}.png', img_list[4])
@@ -611,15 +628,10 @@ class Extraction:
         if self.blend == 'alpha':
             in_channels = 3
         elif self.use_list_length == 3:
-            if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
-                in_channels = sum(self.use_list) * 3
-            elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+            if self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 in_channels = sum(self.use_list) * 3 + 3
-            elif self.experiment_subject == 'both':
-                if self.use_other_channel:
-                    in_channels = sum(self.use_list) * 3
             else:
-                raise Exception(f'実験対象が不正です。experiment_subject : {self.experiment_subject}')
+                in_channels = sum(self.use_list) * 3
         else:
             in_channels = sum(self.use_list)
 
@@ -757,8 +769,21 @@ class Extraction:
             if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear' or self.experiment_subject == 'both':  
                 img = Dataset_experiment_single.get_image(img_path_list, self.use_list, self.color, self.blend)
                 img = img.to(self.device)
-            elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
-                img = Dataset_experiment_plus.get_image(img_path_list, self.use_list, self.experiment_subject, self.color, self.blend)
+            elif self.experiment_subject == 'nuclear+':
+                for path in img_path_list:
+                    base_path = path.split('/x/')[0]
+                    ans_path = f'{base_path}/y_membrane/ans_nograd.png'
+                    img_path_list.append(ans_path)
+                    break
+                img = Dataset_experiment_plus.get_image(img_path_list, self.use_list, self.color,self.blend)
+                img = img.to(self.device)
+            elif self.experiment_subject == 'membrane+':
+                for path in img_path_list:
+                    base_path = path.split('/x/')[0]
+                    ans_path = f'{base_path}/y_nuclear/ans.png'
+                    img_path_list.append(ans_path)
+                    break
+                img = Dataset_experiment_plus.get_image(img_path_list, self.use_list, self.color,self.blend)
                 img = img.to(self.device)
             else:
                 raise Exception(f'実験対象が不正です。experiment_subject : {self.experiment_subject}')
