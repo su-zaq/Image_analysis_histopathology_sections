@@ -479,7 +479,7 @@ class EvaluationAggregation:
         """validationの結果を集計する"""
         self.logger.info('Start Validation Aggregation')
         membrane_log_eval_folder_path = f'{self.path_folder}/log_eval_membrane'
-        nuclear_log_eval_folder_path = f'{self.path_folder}/log_eval_nuclear+'
+        nuclear_log_eval_folder_path = f'{self.path_folder}/log_eval_nuclear'
 
         # 細胞膜の評価が行われている場合
         if os.path.exists(membrane_log_eval_folder_path):
@@ -764,7 +764,7 @@ class EvaluationAggregation:
         assert self.aggregate_validation_end, 'Validation Aggregation has not been done yet.'
         self.logger.info('Start Test Aggregation')
         membrane_log_eval_folder_path = f'{self.path_folder}/log_eval_membrane'
-        nuclear_log_eval_folder_path = f'{self.path_folder}/log_eval_nuclear+'
+        nuclear_log_eval_folder_path = f'{self.path_folder}/log_eval_nuclear'
 
         # 細胞膜の評価が行われている場合
         if os.path.exists(membrane_log_eval_folder_path):
@@ -885,7 +885,7 @@ class EvaluationAggregation:
                 conformity_bottoms = []
                 care_nums = []
 
-                eval_folder_path = exp_num_path.replace('/log_eval_nuclear+/', '/eval_data_nuclear+/')
+                eval_folder_path = exp_num_path.replace('/log_eval_nuclear/', '/eval_data_nuclear/')
                 img_folder_path = f'{eval_folder_path}/test{val_num:02d}/epoch{epoch_num:02d}'
                 self.logger.info(f'Processing {img_folder_path}')
                 img_length = len(get_file_paths(img_folder_path))

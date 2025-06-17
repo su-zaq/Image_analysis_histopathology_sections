@@ -237,8 +237,10 @@ class Extraction:
         elif self.start_num == 0:
             raise Exception(self.default_path + '/log/exp.logは存在します。')
         ## 推論結果画像の保存先
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear' or self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
-            self.save_image_path = self.set_path(self.default_path + f'/eval_data_{experiment_subject}/')
+        if self.experiment_subject == 'membrane' or self.experiment_subject == 'membrane+':
+            self.save_image_path = self.set_path(self.default_path + f'/eval_data_membrane/')
+        elif self.experiment_subject == 'nuclear' or self.experiment_subject == 'nuclear+':
+            self.save_image_path = self.set_path(self.default_path + f'/eval_data_nuclear/')
         elif self.experiment_subject == 'both':
             self.save_membrane_image_path = self.set_path(self.default_path + '/eval_data_membrane/')
             self.save_nuclear_image_path = self.set_path(self.default_path + '/eval_data_nuclear/')
