@@ -150,8 +150,8 @@ class Dataset(data.Dataset):
         img_path = [str(path) for path in img_path]
         return img_path
 
-def get_dataloader(folder_path, use_list, color='RGB', blend='concatenate', other_channel=False, batch_size = 1, num_workers=0, isShuffle=True, pin_memory=True):
-    dataset = Dataset(folder_path, use_list, color=color, blend=blend, other_channel=other_channel)
+def get_dataloader(folder_path, use_list, mask, color='RGB', blend='concatenate', other_channel=False, batch_size = 1, num_workers=0, isShuffle=True, pin_memory=True):
+    dataset = Dataset(folder_path, use_list, mask, color=color, blend=blend, other_channel=other_channel)
     return data.DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=isShuffle, pin_memory=pin_memory)
 
 def _get_image(img_path, color, use_list=None):
@@ -184,6 +184,7 @@ def get_image(img_path_list, use_list, color='RGB', blend='concatenate'):
                 img_list.append(_get_image(img_path_list[1], color))
             if use_list[2]==1:
                 img_list.append(_get_image(img_path_list[2], color))
+            img_list.append(_get_image(img_path_list[3], color))
             img = cv2.merge(img_list)
         elif len(use_list)==9:
             if 1 in use_list[0:3]:

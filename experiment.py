@@ -952,5 +952,5 @@ if __name__ == '__main__':
         ignore_error=ignore_error
     )
     
-    discord_info(117)
+    discord_info(105)
 
