@@ -19,6 +19,7 @@ import ast
 import configparser
 import json
 import time
+import os
 
 from send_info_discord import discord_info
 
@@ -47,6 +48,7 @@ from VitLib_PyTorch.Loss import DiceLoss, FMeasureLoss, IoULoss, ReverseIoULoss
 from VitLib_PyTorch.Network import U_Net, Nested_U_Net
 
 from Dataset import Dataset_experiment_both, Dataset_experiment_single, Dataset_experiment_plus
+from rgb_balance import rgb_balance_grayscale
 
 # 撮像法名略称
 BRIGHT_FIELD = 'bf'
@@ -89,6 +91,7 @@ class Extraction:
             default_path:str='./result',
             compress_rate:int=1,
             ignore_error:bool=False,
+            use_rgb_balance:bool=False,
         ) -> None:
         # 実験パラメータ
         ## 比較対称になる条件
@@ -100,7 +103,9 @@ class Extraction:
         #### 核マスクを使用して膜を抽出 
         self.experiment_subject = experiment_subject
         assert self.experiment_subject in ['membrane', 'nuclear', 'both', 'nuclear+', 'membrane+'], f'実験対象が不正です。experiment_subject : {self.experiment_subject}'
-        
+
+        self.use_rgb_balance = use_rgb_balance
+
         ### 使用ネットワーク(U-Net, U-Net++)
         self.use_Network = use_Network
         assert self.use_Network in ['U-Net', 'U-Net++'], f'使用ネットワークが不正です。use_Network : {self.use_Network}'
@@ -160,7 +165,14 @@ class Extraction:
         # 色空間単位の場合→9
         # RGB, HSV両方使う場合→18
         self.use_list_length = use_list_length
-        assert self.use_list_length in [3, 9, 18], f'撮像法の利用条件が不正です。use_list_length : {self.use_list_length}'
+        assert self.use_list_length in [1, 3, 9, 18], f'撮像法の利用条件が不正です。use_list_length : {self.use_list_length}'
+
+        if self.use_rgb_balance:
+            assert self.experiment_subject in ['membrane', 'nuclear'], 'use_rgb_balance は membrane または nuclear の単独学習時のみ使用できます。'
+            assert self.blend == 'concatenate' and self.use_list_length in (1, 3), (
+                'use_rgb_balance 時は blend=concatenate かつ use_list_length は 1 または 3 である必要があります。'
+                '(1=撮像法を1系統ずつ試す実験、3=bf/df/phのあり/なしをビットで切替)'
+            )
 
         ### 学習に使用する元の画像(1200px × 1600px)フォルダのパス
         self.img_path = img_path
@@ -244,7 +256,20 @@ class Extraction:
         elif self.experiment_subject == 'both':
             self.save_membrane_image_path = self.set_path(self.default_path + '/eval_data_membrane/')
             self.save_nuclear_image_path = self.set_path(self.default_path + '/eval_data_nuclear/')
-
+            
+        ####################################################################################################################
+        # modelの保存
+        self.model_folder = self.set_path(self.default_path + '/model/')
+        ####################################################################################################################
+        # 外部フォルダ推論（epochごと）
+        # 入力：この直下の画像を全部推論（ファイル名は固定しない）
+        self.external_input_root = './test/x'
+        # 出力：epochごとに保存（exp/roop/test/epoch で分かるように）
+        self.external_output_root = self.set_path(self.default_path + '/external_pred/')
+        # BGR->RGB をするか（学習がRGB前提なら True 推奨）
+        self.external_bgr2rgb = True
+        # 学習時に x.max()<=1 なので、推論入力も 0..1 に合わせる
+        self.external_div255 = True
         ####################################################################################################################
         # 学習パラメータの記録  
         self.data_param_path = self.default_path + '/log/data_parm.json'
@@ -292,8 +317,12 @@ class Extraction:
         # パターン数の計算
         # 2のuse_list_length乗から全て使用しない1パターンを引いた値
         if self.blend == 'concatenate':
-            self.img_pattern = 2 ** self.use_list_length -1
-            self.use_lists = [self.get_use_list(n+1, self.use_list_length) for n in range(self.img_pattern)]
+            if self.use_list_length == 1:
+                self.use_lists = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+                self.img_pattern = len(self.use_lists)
+            if self.use_list_length == 3:
+                self.img_pattern = 2 ** self.use_list_length -1
+                self.use_lists = [self.get_use_list(n+1, self.use_list_length) for n in range(self.img_pattern)]
             #if self.use_list_length==3:
             #>> self.use_lists = [[1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]]
             #>> self.use_lists[n] =[明視野の使用有無(0:使用しない, 1:使用), 暗視野の使用有無, 位相差の使用有無]
@@ -388,6 +417,8 @@ class Extraction:
         logger.info(f'記録用のフォルダのパス : {self.default_path}')
         logger.info(f'保存時の圧縮倍率 : {self.compress_rate}')
         logger.info(f'エラーを無視するための設定 : {self.ignore_error}')
+        if self.experiment_subject in ['membrane', 'nuclear']:
+            logger.info(f'RGBバランスチャンネル追加(入力2倍) : {self.use_rgb_balance}')
         logger.info(f'学習時のデータ展開先フォルダ : {self.train_data_folder}')
         logger.info(f'ログ記録用フォルダ : {self.log_folder}')
         if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
@@ -507,6 +538,10 @@ class Extraction:
         create_directory(f'{save_folder_path}/{PHASE_CONTRAST}')
         if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
             create_directory(f'{save_folder_path}/y')
+            if self.use_rgb_balance:
+                create_directory(f'{save_folder_path}/{BRIGHT_FIELD}_bal')
+                create_directory(f'{save_folder_path}/{DARK_FIELD}_bal')
+                create_directory(f'{save_folder_path}/{PHASE_CONTRAST}_bal')
         elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
             create_directory(f'{save_folder_path}/y_membrane')
             create_directory(f'{save_folder_path}/y_nuclear')
@@ -528,6 +563,19 @@ class Extraction:
             bf_img = cv2.imread(f'{img_path}/x/{BRIGHT_FIELD}.png', cv2.IMREAD_COLOR)
             df_img = cv2.imread(f'{img_path}/x/{DARK_FIELD}.png', cv2.IMREAD_COLOR)
             he_img = cv2.imread(f'{img_path}/x/{PHASE_CONTRAST}.png', cv2.IMREAD_COLOR)
+            
+            # 画像の読み込みチェック
+            bf_path = f'{img_path}/x/{BRIGHT_FIELD}.png'
+            df_path = f'{img_path}/x/{DARK_FIELD}.png'
+            he_path = f'{img_path}/x/{PHASE_CONTRAST}.png'
+            
+            if bf_img is None:
+                raise Exception(f'画像の読み込みに失敗しました: {bf_path}')
+            if df_img is None:
+                raise Exception(f'画像の読み込みに失敗しました: {df_path}')
+            if he_img is None:
+                raise Exception(f'画像の読み込みに失敗しました: {he_path}')
+            
             if self.experiment_subject == 'membrane':
                 if self.gradation:
                     ans_img = cv2.imread(f'{img_path}/y_membrane/ans.png', cv2.IMREAD_GRAYSCALE)
@@ -579,6 +627,15 @@ class Extraction:
                 cv2.imwrite(f'{save_folder_path}/{BRIGHT_FIELD}/{img_num:05d}.png', img_list[0])
                 cv2.imwrite(f'{save_folder_path}/{DARK_FIELD}/{img_num:05d}.png', img_list[1])
                 cv2.imwrite(f'{save_folder_path}/{PHASE_CONTRAST}/{img_num:05d}.png', img_list[2])
+                if self.experiment_subject in ('membrane', 'nuclear') and self.use_rgb_balance:
+                    for raw, sub in (
+                        (img_list[0], BRIGHT_FIELD),
+                        (img_list[1], DARK_FIELD),
+                        (img_list[2], PHASE_CONTRAST),
+                    ):
+                        bb, gg, rr = rgb_balance_grayscale(raw)
+                        bal_bgr = cv2.merge([bb, gg, rr])
+                        cv2.imwrite(f'{save_folder_path}/{sub}_bal/{img_num:05d}.png', bal_bgr)
                 if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
                     cv2.imwrite(f'{save_folder_path}/y/{img_num:05d}.png', img_list[3])
                 elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
@@ -629,13 +686,21 @@ class Extraction:
         # Define model
         if self.blend == 'alpha':
             in_channels = 3
+        elif self.use_list_length == 1:
+            in_channels = 3
+            if self.use_rgb_balance and self.experiment_subject in ('membrane', 'nuclear'):
+                in_channels *= 2
         elif self.use_list_length == 3:
             if self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 in_channels = sum(self.use_list) * 3 + 3
             else:
                 in_channels = sum(self.use_list) * 3
+                if self.use_rgb_balance and self.experiment_subject in ('membrane', 'nuclear'):
+                    in_channels *= 2
         else:
             in_channels = sum(self.use_list)
+
+        self.current_in_channels = in_channels
 
         if self.use_Network == 'U-Net':
             if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
@@ -692,7 +757,11 @@ class Extraction:
 
         # Data loader
         if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
-            self.dataloader = Dataset_experiment_single.get_dataloader(self.train_path_list, self.use_list, self.color, self.blend, batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True)
+            self.dataloader = Dataset_experiment_single.get_dataloader(
+                self.train_path_list, self.use_list, self.color, self.blend,
+                batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True,
+                use_rgb_balance=self.use_rgb_balance,
+            )
         elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
             self.dataloader = Dataset_experiment_plus.get_dataloader(self.train_path_list, self.use_list, self.experiment_subject, self.color, self.blend, batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True)
         elif self.experiment_subject == 'both':
@@ -702,7 +771,13 @@ class Extraction:
         for epoch in range(self.num_epochs):
             logger.info(f'experiment: {self.exp_num}/{self.img_pattern} - roop_num: {self.j + 1} / {self.roop_num} - all_roop_num: {(self.exp_num - 1) * self.roop_num + self.j + 1} / {self.roop_num * self.img_pattern} - epoch: {epoch + 1}/{self.num_epochs}')
             self.train()
-
+            ################################################################
+            # save_model
+            if (epoch + 1) == 20:
+                self.save_model(epoch + 1)
+            
+            self.external_infer(epoch + 1)
+            ################################################################
             if self.roop_num > 2:
                 # Validation
                 img_path_list = self.pathological_specimen_folder_paths[self.val_num]
@@ -769,7 +844,9 @@ class Extraction:
 
             self.model.eval()
             if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear' or self.experiment_subject == 'both':  
-                img = Dataset_experiment_single.get_image(img_path_list, self.use_list, self.color, self.blend)
+                img = Dataset_experiment_single.get_image(
+                    img_path_list, self.use_list, self.color, self.blend, use_rgb_balance=self.use_rgb_balance
+                )
                 img = img.to(self.device)
             elif self.experiment_subject == 'nuclear+':
                 for path in img_path_list:
@@ -870,6 +947,174 @@ class Extraction:
             average_loss += loss.item()
             current += x.size(0)
             train_roop.set_postfix_str(f'loss: {average_loss/current:>7f}  [{current:>5d}/{size:>5d}]')
+    
+    def save_model(self, epoch:int) -> None:
+        """モデルと学習情報を保存する関数"""
+        # DataParallel対応
+        model_to_save = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
+
+        save_obj = {
+            "epoch": epoch,
+            "exp_num": self.exp_num,
+            "use_list": self.use_list,
+            "roop_j": self.j,
+            "state_dict": model_to_save.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "use_Network": self.use_Network,
+            "experiment_subject": self.experiment_subject,
+            "color": self.color,
+            "blend": self.blend,
+            "use_list_length": self.use_list_length,
+            "in_channels": getattr(model_to_save, "in_channels", None),
+            "use_rgb_balance": self.use_rgb_balance,
+        }
+
+        # ファイル名：どの実験・どの分割・何epochか分かるように
+        path = f"{self.model_folder}exp{self.exp_num:04d}_test{self.test_num+1:02d}_epoch{epoch:02d}.pth"
+        torch.save(save_obj, path)
+        logger.info(f"Model saved: {path}")
+        
+    def load_external_image(self, path: str) -> torch.Tensor:
+        """外部フォルダ画像を読み込んでモデル入力Tensorを作る（撮像法1つ固定）"""
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            raise Exception(f'画像の読み込みに失敗しました: {path}')
+
+        # 2D -> 3D
+        if img.ndim == 2:
+            img = img[:, :, None]
+
+        # チャンネル調整：モデルのin_channelsに合わせる
+        # U_Net / Nested_U_Net の in_channels を直接持ってないことがあるので、
+        # 推論時は「現在のモデルが受け付ける入力チャンネル数」を self.use_list から推定した in_channels と同じにする
+        # train_roop()で計算した in_channels を保持しておくのが確実なので、無ければここで再計算する
+        if not hasattr(self, "current_in_channels"):
+            # train_roop()のin_channels計算と同じ
+            if self.blend == 'alpha':
+                in_channels = 3
+            elif self.use_list_length == 1:
+                in_channels = 3
+                if self.use_rgb_balance and self.experiment_subject in ('membrane', 'nuclear'):
+                    in_channels *= 2
+            elif self.use_list_length == 3:
+                if self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
+                    in_channels = sum(self.use_list) * 3 + 3
+                else:
+                    in_channels = sum(self.use_list) * 3
+                    if self.use_rgb_balance and self.experiment_subject in ('membrane', 'nuclear'):
+                        in_channels *= 2
+            else:
+                in_channels = sum(self.use_list)
+            self.current_in_channels = in_channels
+
+        in_channels = self.current_in_channels
+
+        # 膜・核単独 + RGBバランス + 撮像法1成分 use_list のときは 1 枚の BGR から 6ch を構成
+        if (
+            self.use_rgb_balance
+            and self.experiment_subject in ('membrane', 'nuclear')
+            and self.use_list_length in (1, 3)
+            and sum(self.use_list) == 1
+            and img.shape[2] >= 3
+        ):
+            bgr_u8 = img[:, :, :3].astype(np.uint8)
+            if self.color == 'RGB':
+                part1 = cv2.cvtColor(bgr_u8, cv2.COLOR_BGR2RGB).astype(np.float32)
+            else:
+                part1 = cv2.cvtColor(bgr_u8, cv2.COLOR_BGR2HSV).astype(np.float32)
+            if self.external_div255:
+                part1 /= 255.0
+            b0, g0, r0 = rgb_balance_grayscale(bgr_u8)
+            bal_bgr = cv2.merge([b0, g0, r0])
+            if self.color == 'RGB':
+                part2 = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+            else:
+                part2 = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+            if self.external_div255:
+                part2 /= 255.0
+            img_f = np.concatenate([part1, part2], axis=2)
+            x = torch.from_numpy(img_f).permute(2, 0, 1)
+            if x.shape[0] < in_channels:
+                pad = torch.zeros((in_channels - x.shape[0], x.shape[1], x.shape[2]), dtype=x.dtype)
+                x = torch.cat([x, pad], dim=0)
+            elif x.shape[0] > in_channels:
+                x = x[:in_channels]
+            return x
+
+        # BGR->RGB（cv2はBGR）
+        if img.shape[2] >= 3 and in_channels >= 3:
+            img = img[:, :, :3]
+            if self.external_bgr2rgb:
+                img = img[:, :, ::-1]
+        else:
+            img = img[:, :, :min(img.shape[2], in_channels)]
+
+        # float化
+        img = img.astype(np.float32)
+
+        # 学習時と合わせる（x.max()<=1 なので）
+        if self.external_div255:
+            img /= 255.0
+
+        # HWC -> CHW
+        x = torch.from_numpy(img).permute(2, 0, 1)
+
+        # チャンネルが足りない場合は0でパディング
+        if x.shape[0] < in_channels:
+            pad = torch.zeros((in_channels - x.shape[0], x.shape[1], x.shape[2]), dtype=x.dtype)
+            x = torch.cat([x, pad], dim=0)
+
+        # 多い場合は切る
+        if x.shape[0] > in_channels:
+            x = x[:in_channels]
+
+        return x
+
+    def external_infer(self, epoch: int) -> None:
+        """epochごとに外部フォルダ（self.external_input_root）直下の画像を全推論して保存"""
+        if not file_exists(self.external_input_root):
+            logger.warning(f'external_input_root が存在しません: {self.external_input_root}')
+            return
+
+        # 出力先（epochごと）
+        out_dir = self.set_path(
+            f'{self.external_output_root}'
+            f'exp{self.exp_num:04d}/test{self.test_num+1:02d}/epoch{epoch:02d}/'
+        )
+
+        # 直下の画像だけ対象
+        exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp')
+        files = [
+            f for f in os.listdir(self.external_input_root)
+            if os.path.isfile(os.path.join(self.external_input_root, f)) and f.lower().endswith(exts)
+        ]
+        if len(files) == 0:
+            logger.warning(f'external_input_root に画像がありません: {self.external_input_root}')
+            return
+
+        self.model.eval()
+        for fname in tqdm(files, desc=f'external_infer epoch{epoch:02d}'):
+            in_path = os.path.join(self.external_input_root, fname)
+
+            x = self.load_external_image(in_path).unsqueeze(0).to(self.device, non_blocking=True)
+
+            with torch.no_grad():
+                pred = self.model(x)
+                if isinstance(pred, list):
+                    pred = pred[-1]
+
+                base = os.path.splitext(fname)[0]
+
+                if self.experiment_subject == 'both':
+                    self.image_compression_save(pred, f'{out_dir}{base}_mem.png', divide=self.compress_rate, channel=0)
+                    self.image_compression_save(pred, f'{out_dir}{base}_nuc.png', divide=self.compress_rate, channel=1)
+                else:
+                    self.image_compression_save(pred, f'{out_dir}{base}.png', divide=self.compress_rate, channel=0)
+
+            del x, pred
+            torch.cuda.empty_cache()
+
+
 
 if __name__ == '__main__':
     arg = argparse.ArgumentParser()
@@ -920,6 +1165,7 @@ if __name__ == '__main__':
     default_path = EXPERIMENT_PATH.get('default_path', './result')
     compress_rate = int(EXPERIMENT_PARAM.get('compress_rate', 1))
     ignore_error = bool(EXPERIMENT_PARAM.get('ignore_error', False))
+    use_rgb_balance = bool(EXPERIMENT_PARAM.get('use_rgb_balance', False))
 
     Extraction(
         experiment_subject=experiment_subject,
@@ -949,7 +1195,8 @@ if __name__ == '__main__':
         autocast_dtype=autocast_dtype,
         default_path=default_path,
         compress_rate=compress_rate,
-        ignore_error=ignore_error
+        ignore_error=ignore_error,
+        use_rgb_balance=use_rgb_balance,
     )
     
     discord_info(117)

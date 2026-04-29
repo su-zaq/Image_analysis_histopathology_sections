@@ -6,8 +6,10 @@ from PIL import Image
 import cv2
 import numpy as np
 
+from rgb_balance import rgb_balance_grayscale
+
 class Dataset(data.Dataset):
-    def __init__(self, folder_path, use_list, color='RGB', blend='concatenate'):
+    def __init__(self, folder_path, use_list, color='RGB', blend='concatenate', use_rgb_balance: bool = False):
         """
         Args:
             folder_path (list): 画像フォルダのパス
@@ -24,16 +26,29 @@ class Dataset(data.Dataset):
         self.bf_img_paths = []
         self.df_img_paths = []
         self.ph_img_paths = []
+        self.bf_bal_img_paths = []
+        self.df_bal_img_paths = []
+        self.ph_bal_img_paths = []
         self.y_img_paths = []
+        self.use_rgb_balance = use_rgb_balance
         for path in folder_path:
             self.bf_img_paths += self._get_file_path(path+'/bf')
             self.df_img_paths += self._get_file_path(path+'/df')
             self.ph_img_paths += self._get_file_path(path+'/ph')
+            if use_rgb_balance:
+                self.bf_bal_img_paths += self._get_file_path(path + '/bf_bal')
+                self.df_bal_img_paths += self._get_file_path(path + '/df_bal')
+                self.ph_bal_img_paths += self._get_file_path(path + '/ph_bal')
             self.y_img_paths += self._get_file_path(path+'/y')
         self.use_list = use_list
         self.color = color
         self.blend = blend
         self.to_tensor = torchvision.transforms.ToTensor()
+
+        if use_rgb_balance and (blend != 'concatenate' or len(use_list) != 3):
+            raise Exception('use_rgb_balance 時は blend=concatenate かつ use_list の長さ 3 である必要があります。')
+        if use_rgb_balance and len(self.bf_img_paths) != len(self.bf_bal_img_paths):
+            raise Exception('bf と bf_bal の枚数が一致しません。')
 
         if blend == 'alpha' and len(use_list)!=3:
             raise Exception(f'Blend mode "alpha" is only available when use_list length is 3: {len(use_list)}')
@@ -41,17 +56,30 @@ class Dataset(data.Dataset):
             # αブレンディングの場合は、use_listの合計が1である必要があります。
             raise Exception(f'Blend mode "alpha" is only available when sum of use_list is 1: {sum(use_list)}')
 
+    def _append_balance_pair(self, base_paths, index):
+        im = self._get_image(base_paths, index, self.color)
+        if not self.use_rgb_balance:
+            return im
+        if base_paths is self.bf_img_paths:
+            bal_paths = self.bf_bal_img_paths
+        elif base_paths is self.df_img_paths:
+            bal_paths = self.df_bal_img_paths
+        else:
+            bal_paths = self.ph_bal_img_paths
+        im_bal = self._get_image(bal_paths, index, self.color)
+        return np.concatenate([im, im_bal], axis=2)
+
     def __getitem__(self, index):
         if self.blend == 'concatenate':
             img_list = []
             if len(self.use_list)==3:#撮像法のみの検討
                 if self.use_list[0]==1:
-                    img_list.append(self._get_image(self.bf_img_paths, index, self.color))
+                    img_list.append(self._append_balance_pair(self.bf_img_paths, index))
                 if self.use_list[1]==1:
-                    img_list.append(self._get_image(self.df_img_paths, index, self.color))
+                    img_list.append(self._append_balance_pair(self.df_img_paths, index))
                 if self.use_list[2]==1:
-                    img_list.append(self._get_image(self.ph_img_paths, index, self.color))
-                x = cv2.merge(img_list)
+                    img_list.append(self._append_balance_pair(self.ph_img_paths, index))
+                x = np.concatenate(img_list, axis=2) if self.use_rgb_balance else cv2.merge(img_list)
             elif len(self.use_list)==9:#色空間毎の検討
                 if 1 in self.use_list[0:3]:
                     img_list.append(self._get_image(self.bf_img_paths, index, self.color, self.use_list[0:3]))
@@ -124,8 +152,8 @@ class Dataset(data.Dataset):
         img_path = [str(path) for path in img_path]
         return img_path
 
-def get_dataloader(folder_path, use_list, color='RGB', blend='concatenate', batch_size = 1, num_workers=0, isShuffle=True, pin_memory=True):
-    dataset = Dataset(folder_path, use_list, color=color, blend=blend)
+def get_dataloader(folder_path, use_list, color='RGB', blend='concatenate', batch_size = 1, num_workers=0, isShuffle=True, pin_memory=True, use_rgb_balance: bool = False):
+    dataset = Dataset(folder_path, use_list, color=color, blend=blend, use_rgb_balance=use_rgb_balance)
     return data.DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=isShuffle, pin_memory=pin_memory)
 
 def _get_image(img_path, color, use_list=None):
@@ -148,17 +176,47 @@ def _get_image(img_path, color, use_list=None):
                 img_list.append(b)
             return cv2.merge(img_list)
 
-def get_image(img_path_list, use_list, color='RGB', blend='concatenate'):
+def get_image(img_path_list, use_list, color='RGB', blend='concatenate', use_rgb_balance: bool = False):
     if blend == 'concatenate':
         img_list = []
         if len(use_list)==3:#撮像法のみの検討
             if use_list[0]==1:
-                img_list.append(_get_image(img_path_list[0], color))
+                im0 = _get_image(img_path_list[0], color)
+                if use_rgb_balance:
+                    bgr = cv2.imread(img_path_list[0], cv2.IMREAD_COLOR)
+                    b0, g0, r0 = rgb_balance_grayscale(bgr)
+                    bal_bgr = cv2.merge([b0, g0, r0])
+                    if color == 'RGB':
+                        im0b = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB)
+                    else:
+                        im0b = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV)
+                    im0 = np.concatenate([im0, im0b], axis=2)
+                img_list.append(im0)
             if use_list[1]==1:
-                img_list.append(_get_image(img_path_list[1], color))
+                im1 = _get_image(img_path_list[1], color)
+                if use_rgb_balance:
+                    bgr = cv2.imread(img_path_list[1], cv2.IMREAD_COLOR)
+                    b0, g0, r0 = rgb_balance_grayscale(bgr)
+                    bal_bgr = cv2.merge([b0, g0, r0])
+                    if color == 'RGB':
+                        im1b = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB)
+                    else:
+                        im1b = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV)
+                    im1 = np.concatenate([im1, im1b], axis=2)
+                img_list.append(im1)
             if use_list[2]==1:
-                img_list.append(_get_image(img_path_list[2], color))
-            img = cv2.merge(img_list)
+                im2 = _get_image(img_path_list[2], color)
+                if use_rgb_balance:
+                    bgr = cv2.imread(img_path_list[2], cv2.IMREAD_COLOR)
+                    b0, g0, r0 = rgb_balance_grayscale(bgr)
+                    bal_bgr = cv2.merge([b0, g0, r0])
+                    if color == 'RGB':
+                        im2b = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB)
+                    else:
+                        im2b = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV)
+                    im2 = np.concatenate([im2, im2b], axis=2)
+                img_list.append(im2)
+            img = np.concatenate(img_list, axis=2) if use_rgb_balance else cv2.merge(img_list)
         elif len(use_list)==9:
             if 1 in use_list[0:3]:
                 img_list.append(_get_image(img_path_list[0], color, use_list[0:3]))
