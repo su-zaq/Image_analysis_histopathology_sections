@@ -1199,5 +1199,5 @@ if __name__ == '__main__':
         use_rgb_balance=use_rgb_balance,
     )
     
-    discord_info(117)
+    discord_info(105)
 
