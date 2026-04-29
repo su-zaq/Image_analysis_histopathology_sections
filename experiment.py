@@ -1130,18 +1130,23 @@ if __name__ == '__main__':
         EXPERIMENT_PATH = {}
         EXPERIMENT_PARAM = {}
 
+    def _cfg_bool(key: str, default: bool = False) -> bool:
+        if hasattr(EXPERIMENT_PARAM, 'getboolean'):
+            return EXPERIMENT_PARAM.getboolean(key, fallback=default)
+        return default
+
     experiment_subject = EXPERIMENT_PARAM.get('experiment_subject', 'membrane')
     use_Network = EXPERIMENT_PARAM.get('use_Network', 'U-Net')
-    deep_supervision = bool(EXPERIMENT_PARAM.get('deep_supervision', False))
+    deep_supervision = _cfg_bool('deep_supervision', False)
     color = EXPERIMENT_PARAM.get('color', 'RGB')
     blend = EXPERIMENT_PARAM.get('blend', 'concatenate')
-    gradation = bool(EXPERIMENT_PARAM.get('gradation', False))
-    train_dont_care = bool(EXPERIMENT_PARAM.get('train_dont_care', False))
+    gradation = _cfg_bool('gradation', False)
+    train_dont_care = _cfg_bool('train_dont_care', False)
     care_rate = float(EXPERIMENT_PARAM.get('care_rate', 75))
     lower_ratio = float(EXPERIMENT_PARAM.get('lower_ratio', 17))
     higher_ratio = float(EXPERIMENT_PARAM.get('higher_ratio', 0))
-    use_other_channel = bool(EXPERIMENT_PARAM.get('use_other_channel', False))
-    use_softmax = bool(EXPERIMENT_PARAM.get('use_softmax', False))
+    use_other_channel = _cfg_bool('use_other_channel', False)
+    use_softmax = _cfg_bool('use_softmax', False)
     start_num = int(EXPERIMENT_PARAM.get('start_num', 0))
     num_epochs = int(EXPERIMENT_PARAM.get('num_epochs', 40))
     lr = float(EXPERIMENT_PARAM.get('lr', 5e-4))
@@ -1156,7 +1161,7 @@ if __name__ == '__main__':
     radius_train = int(EXPERIMENT_PARAM.get('radius_train', 3))
     radius_eval = int(EXPERIMENT_PARAM.get('radius_eval', 3))
     use_device = ast.literal_eval(EXPERIMENT_PARAM.get('use_device', '[0]'))
-    use_autocast = bool(EXPERIMENT_PARAM.get('use_autocast', False))
+    use_autocast = _cfg_bool('use_autocast', False)
     autocast_dtype_text = EXPERIMENT_PARAM.get('autocast_dtype', 'float16')
     try:
         autocast_dtype = getattr(torch, autocast_dtype_text)
@@ -1164,8 +1169,8 @@ if __name__ == '__main__':
         autocast_dtype = torch.bfloat16
     default_path = EXPERIMENT_PATH.get('default_path', './result')
     compress_rate = int(EXPERIMENT_PARAM.get('compress_rate', 1))
-    ignore_error = bool(EXPERIMENT_PARAM.get('ignore_error', False))
-    use_rgb_balance = bool(EXPERIMENT_PARAM.get('use_rgb_balance', False))
+    ignore_error = _cfg_bool('ignore_error', False)
+    use_rgb_balance = _cfg_bool('use_rgb_balance', False)
 
     Extraction(
         experiment_subject=experiment_subject,
