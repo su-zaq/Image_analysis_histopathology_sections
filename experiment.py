@@ -48,7 +48,7 @@ from VitLib_PyTorch.Loss import DiceLoss, FMeasureLoss, IoULoss, ReverseIoULoss
 from VitLib_PyTorch.Network import U_Net, Nested_U_Net
 
 from Dataset import Dataset_experiment_both, Dataset_experiment_single, Dataset_experiment_plus
-from rgb_balance import rgb_balance_grayscale
+from rgb_balance import rgb_balance_grayscale, rgb_chromatic_diff_grayscale
 
 # 撮像法名略称
 BRIGHT_FIELD = 'bf'
@@ -92,6 +92,7 @@ class Extraction:
             compress_rate:int=1,
             ignore_error:bool=False,
             use_rgb_balance:bool=False,
+            use_rgb_chromatic:bool=False,
         ) -> None:
         # 実験パラメータ
         ## 比較対称になる条件
@@ -105,6 +106,7 @@ class Extraction:
         assert self.experiment_subject in ['membrane', 'nuclear', 'both', 'nuclear+', 'membrane+'], f'実験対象が不正です。experiment_subject : {self.experiment_subject}'
 
         self.use_rgb_balance = use_rgb_balance
+        self.use_rgb_chromatic = use_rgb_chromatic
 
         ### 使用ネットワーク(U-Net, U-Net++)
         self.use_Network = use_Network
@@ -167,10 +169,10 @@ class Extraction:
         self.use_list_length = use_list_length
         assert self.use_list_length in [1, 3, 9, 18], f'撮像法の利用条件が不正です。use_list_length : {self.use_list_length}'
 
-        if self.use_rgb_balance:
-            assert self.experiment_subject in ['membrane', 'nuclear'], 'use_rgb_balance は membrane または nuclear の単独学習時のみ使用できます。'
+        if self.use_rgb_balance or self.use_rgb_chromatic:
+            assert self.experiment_subject in ['membrane', 'nuclear'], 'use_rgb_balance / use_rgb_chromatic は membrane または nuclear の単独学習時のみ使用できます。'
             assert self.blend == 'concatenate' and self.use_list_length in (1, 3), (
-                'use_rgb_balance 時は blend=concatenate かつ use_list_length は 1 または 3 である必要があります。'
+                'use_rgb_balance / use_rgb_chromatic 時は blend=concatenate かつ use_list_length は 1 または 3 である必要があります。'
                 '(1=撮像法を1系統ずつ試す実験、3=bf/df/phのあり/なしをビットで切替)'
             )
 
@@ -418,7 +420,7 @@ class Extraction:
         logger.info(f'保存時の圧縮倍率 : {self.compress_rate}')
         logger.info(f'エラーを無視するための設定 : {self.ignore_error}')
         if self.experiment_subject in ['membrane', 'nuclear']:
-            logger.info(f'RGBバランスチャンネル追加(入力2倍) : {self.use_rgb_balance}')
+            logger.info(f'RGBバランスチャンネル追加 : {self.use_rgb_balance}, RGB色差チャンネル追加 : {self.use_rgb_chromatic}')
         logger.info(f'学習時のデータ展開先フォルダ : {self.train_data_folder}')
         logger.info(f'ログ記録用フォルダ : {self.log_folder}')
         if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
@@ -524,6 +526,17 @@ class Extraction:
         for img_path in get_file_paths(img_folder_path):
             self.make_ans_single_img_nuclear(f'{img_path}/y_nuclear/ans.png', f'{img_path}/x/{BRIGHT_FIELD}.png', f'{img_path}/y_nuclear/eval.png', f'{img_path}/y_nuclear/red.png', f'{img_path}/y_nuclear/green.png')
 
+    def _rgb_extra_channel_multiplier(self) -> int:
+        """膜・核単独時: 1 + (バランス3ch) + (色差3ch) のブロック数。"""
+        if self.experiment_subject not in ('membrane', 'nuclear'):
+            return 1
+        m = 1
+        if self.use_rgb_balance:
+            m += 1
+        if self.use_rgb_chromatic:
+            m += 1
+        return m
+
     def proc_img(self, img_folder_path:str, save_folder_path:str) -> None:
         """画像の拡張を行う関数
 
@@ -542,6 +555,10 @@ class Extraction:
                 create_directory(f'{save_folder_path}/{BRIGHT_FIELD}_bal')
                 create_directory(f'{save_folder_path}/{DARK_FIELD}_bal')
                 create_directory(f'{save_folder_path}/{PHASE_CONTRAST}_bal')
+            if self.use_rgb_chromatic:
+                create_directory(f'{save_folder_path}/{BRIGHT_FIELD}_cdiff')
+                create_directory(f'{save_folder_path}/{DARK_FIELD}_cdiff')
+                create_directory(f'{save_folder_path}/{PHASE_CONTRAST}_cdiff')
         elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
             create_directory(f'{save_folder_path}/y_membrane')
             create_directory(f'{save_folder_path}/y_nuclear')
@@ -627,15 +644,20 @@ class Extraction:
                 cv2.imwrite(f'{save_folder_path}/{BRIGHT_FIELD}/{img_num:05d}.png', img_list[0])
                 cv2.imwrite(f'{save_folder_path}/{DARK_FIELD}/{img_num:05d}.png', img_list[1])
                 cv2.imwrite(f'{save_folder_path}/{PHASE_CONTRAST}/{img_num:05d}.png', img_list[2])
-                if self.experiment_subject in ('membrane', 'nuclear') and self.use_rgb_balance:
+                if self.experiment_subject in ('membrane', 'nuclear') and (self.use_rgb_balance or self.use_rgb_chromatic):
                     for raw, sub in (
                         (img_list[0], BRIGHT_FIELD),
                         (img_list[1], DARK_FIELD),
                         (img_list[2], PHASE_CONTRAST),
                     ):
-                        bb, gg, rr = rgb_balance_grayscale(raw)
-                        bal_bgr = cv2.merge([bb, gg, rr])
-                        cv2.imwrite(f'{save_folder_path}/{sub}_bal/{img_num:05d}.png', bal_bgr)
+                        if self.use_rgb_balance:
+                            bb, gg, rr = rgb_balance_grayscale(raw)
+                            bal_bgr = cv2.merge([bb, gg, rr])
+                            cv2.imwrite(f'{save_folder_path}/{sub}_bal/{img_num:05d}.png', bal_bgr)
+                        if self.use_rgb_chromatic:
+                            rb, gb, rg = rgb_chromatic_diff_grayscale(raw)
+                            cd_bgr = cv2.merge([rb, gb, rg])
+                            cv2.imwrite(f'{save_folder_path}/{sub}_cdiff/{img_num:05d}.png', cd_bgr)
                 if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
                     cv2.imwrite(f'{save_folder_path}/y/{img_num:05d}.png', img_list[3])
                 elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
@@ -687,16 +709,12 @@ class Extraction:
         if self.blend == 'alpha':
             in_channels = 3
         elif self.use_list_length == 1:
-            in_channels = 3
-            if self.use_rgb_balance and self.experiment_subject in ('membrane', 'nuclear'):
-                in_channels *= 2
+            in_channels = 3 * self._rgb_extra_channel_multiplier()
         elif self.use_list_length == 3:
             if self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 in_channels = sum(self.use_list) * 3 + 3
             else:
-                in_channels = sum(self.use_list) * 3
-                if self.use_rgb_balance and self.experiment_subject in ('membrane', 'nuclear'):
-                    in_channels *= 2
+                in_channels = sum(self.use_list) * 3 * self._rgb_extra_channel_multiplier()
         else:
             in_channels = sum(self.use_list)
 
@@ -761,6 +779,7 @@ class Extraction:
                 self.train_path_list, self.use_list, self.color, self.blend,
                 batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True,
                 use_rgb_balance=self.use_rgb_balance,
+                use_rgb_chromatic=self.use_rgb_chromatic,
             )
         elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
             self.dataloader = Dataset_experiment_plus.get_dataloader(self.train_path_list, self.use_list, self.experiment_subject, self.color, self.blend, batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True)
@@ -845,7 +864,9 @@ class Extraction:
             self.model.eval()
             if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear' or self.experiment_subject == 'both':  
                 img = Dataset_experiment_single.get_image(
-                    img_path_list, self.use_list, self.color, self.blend, use_rgb_balance=self.use_rgb_balance
+                    img_path_list, self.use_list, self.color, self.blend,
+                    use_rgb_balance=self.use_rgb_balance,
+                    use_rgb_chromatic=self.use_rgb_chromatic,
                 )
                 img = img.to(self.device)
             elif self.experiment_subject == 'nuclear+':
@@ -967,6 +988,7 @@ class Extraction:
             "use_list_length": self.use_list_length,
             "in_channels": getattr(model_to_save, "in_channels", None),
             "use_rgb_balance": self.use_rgb_balance,
+            "use_rgb_chromatic": self.use_rgb_chromatic,
         }
 
         # ファイル名：どの実験・どの分割・何epochか分かるように
@@ -993,25 +1015,21 @@ class Extraction:
             if self.blend == 'alpha':
                 in_channels = 3
             elif self.use_list_length == 1:
-                in_channels = 3
-                if self.use_rgb_balance and self.experiment_subject in ('membrane', 'nuclear'):
-                    in_channels *= 2
+                in_channels = 3 * self._rgb_extra_channel_multiplier()
             elif self.use_list_length == 3:
                 if self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                     in_channels = sum(self.use_list) * 3 + 3
                 else:
-                    in_channels = sum(self.use_list) * 3
-                    if self.use_rgb_balance and self.experiment_subject in ('membrane', 'nuclear'):
-                        in_channels *= 2
+                    in_channels = sum(self.use_list) * 3 * self._rgb_extra_channel_multiplier()
             else:
                 in_channels = sum(self.use_list)
             self.current_in_channels = in_channels
 
         in_channels = self.current_in_channels
 
-        # 膜・核単独 + RGBバランス + 撮像法1成分 use_list のときは 1 枚の BGR から 6ch を構成
+        # 膜・核単独 + RGB 拡張チャンネル + 撮像法1成分 use_list のときは 1 枚の BGR から複数ブロックを構成
         if (
-            self.use_rgb_balance
+            (self.use_rgb_balance or self.use_rgb_chromatic)
             and self.experiment_subject in ('membrane', 'nuclear')
             and self.use_list_length in (1, 3)
             and sum(self.use_list) == 1
@@ -1024,15 +1042,28 @@ class Extraction:
                 part1 = cv2.cvtColor(bgr_u8, cv2.COLOR_BGR2HSV).astype(np.float32)
             if self.external_div255:
                 part1 /= 255.0
-            b0, g0, r0 = rgb_balance_grayscale(bgr_u8)
-            bal_bgr = cv2.merge([b0, g0, r0])
-            if self.color == 'RGB':
-                part2 = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
-            else:
-                part2 = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
-            if self.external_div255:
-                part2 /= 255.0
-            img_f = np.concatenate([part1, part2], axis=2)
+            parts = [part1]
+            if self.use_rgb_balance:
+                b0, g0, r0 = rgb_balance_grayscale(bgr_u8)
+                bal_bgr = cv2.merge([b0, g0, r0])
+                if self.color == 'RGB':
+                    part_b = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+                else:
+                    part_b = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+                if self.external_div255:
+                    part_b /= 255.0
+                parts.append(part_b)
+            if self.use_rgb_chromatic:
+                rb, gb, rg = rgb_chromatic_diff_grayscale(bgr_u8)
+                cd_bgr = cv2.merge([rb, gb, rg])
+                if self.color == 'RGB':
+                    part_c = cv2.cvtColor(cd_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+                else:
+                    part_c = cv2.cvtColor(cd_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+                if self.external_div255:
+                    part_c /= 255.0
+                parts.append(part_c)
+            img_f = np.concatenate(parts, axis=2)
             x = torch.from_numpy(img_f).permute(2, 0, 1)
             if x.shape[0] < in_channels:
                 pad = torch.zeros((in_channels - x.shape[0], x.shape[1], x.shape[2]), dtype=x.dtype)
@@ -1171,6 +1202,7 @@ if __name__ == '__main__':
     compress_rate = int(EXPERIMENT_PARAM.get('compress_rate', 1))
     ignore_error = _cfg_bool('ignore_error', False)
     use_rgb_balance = _cfg_bool('use_rgb_balance', False)
+    use_rgb_chromatic = _cfg_bool('use_rgb_chromatic', False)
 
     Extraction(
         experiment_subject=experiment_subject,
@@ -1202,6 +1234,7 @@ if __name__ == '__main__':
         compress_rate=compress_rate,
         ignore_error=ignore_error,
         use_rgb_balance=use_rgb_balance,
+        use_rgb_chromatic=use_rgb_chromatic,
     )
     
     discord_info(105)

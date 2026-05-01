@@ -21,7 +21,7 @@ import torch
 
 from VitLib import create_directory
 from VitLib_PyTorch.Network import U_Net, Nested_U_Net
-from rgb_balance import rgb_balance_grayscale
+from rgb_balance import rgb_balance_grayscale, rgb_chromatic_diff_grayscale
 
 
 # =========================
@@ -36,8 +36,9 @@ DEVICE = "cuda:0"
 # 学習時と合わせる
 USE_NETWORK = "U-Net"                # "U-Net" or "U-Net++"
 EXPERIMENT_SUBJECT = "membrane"      # "membrane" / "nuclear" / "both"
-IN_CHANNELS = 3                      # 学習がRGBなら3。膜・核単独で use_rgb_balance なら通常は 6,9,18（元の3の2倍）
-USE_RGB_BALANCE = False              # experiment の use_rgb_balance=True で学習した場合 True（撮像法1つだけ使う推論向け）
+IN_CHANNELS = 3                      # 学習と一致させる。膜・核単独で拡張ch使用時は 6,9,12,18 など
+USE_RGB_BALANCE = False              # experiment の use_rgb_balance=True なら True
+USE_RGB_CHROMATIC = False            # experiment の use_rgb_chromatic=True なら True（バランスと独立）
 INPUT_COLOR = "RGB"                 # 学習の color に合わせる "RGB" or "HSV"
 DEEP_SUPERVISION = False             # U-Net++でdeepsupervision使ってたなら True
 USE_OTHER_CHANNEL = False            # bothのときのみ（学習と合わせる）
@@ -101,7 +102,7 @@ def load_image_tensor(path: str) -> torch.Tensor:
         img = img[:, :, None]
 
     if (
-        USE_RGB_BALANCE
+        (USE_RGB_BALANCE or USE_RGB_CHROMATIC)
         and EXPERIMENT_SUBJECT in ("membrane", "nuclear")
         and img.shape[2] >= 3
     ):
@@ -112,15 +113,28 @@ def load_image_tensor(path: str) -> torch.Tensor:
             p1 = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
         if INPUT_DIV_255:
             p1 /= 255.0
-        b0, g0, r0 = rgb_balance_grayscale(bgr)
-        bal_bgr = cv2.merge([b0, g0, r0])
-        if INPUT_COLOR == "RGB":
-            p2 = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
-        else:
-            p2 = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
-        if INPUT_DIV_255:
-            p2 /= 255.0
-        img = np.concatenate([p1, p2], axis=2)
+        parts = [p1]
+        if USE_RGB_BALANCE:
+            b0, g0, r0 = rgb_balance_grayscale(bgr)
+            bal_bgr = cv2.merge([b0, g0, r0])
+            if INPUT_COLOR == "RGB":
+                pb = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+            else:
+                pb = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+            if INPUT_DIV_255:
+                pb /= 255.0
+            parts.append(pb)
+        if USE_RGB_CHROMATIC:
+            rb, gb, rg = rgb_chromatic_diff_grayscale(bgr)
+            cd_bgr = cv2.merge([rb, gb, rg])
+            if INPUT_COLOR == "RGB":
+                pc = cv2.cvtColor(cd_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+            else:
+                pc = cv2.cvtColor(cd_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+            if INPUT_DIV_255:
+                pc /= 255.0
+            parts.append(pc)
+        img = np.concatenate(parts, axis=2)
         if RESIZE is not None:
             img = cv2.resize(img, RESIZE, interpolation=cv2.INTER_LINEAR)
         x = torch.from_numpy(img).permute(2, 0, 1)
