@@ -2,6 +2,6 @@ send_info_discord.py
 .cursorrules
 result
 .venv
-Dataset/_pycache_
-_pycache_
+Dataset/__pycache__
+__pycache__
 Data
