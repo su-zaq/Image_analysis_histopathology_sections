@@ -57,7 +57,7 @@ pip install pandas opencv-python-headless pillow tqdm
 - 初回（`start_num == 0`）は `default_path` 下にログ等を作成します。既に `log/exp.log` があると再実行で例外になるため、続きから回す場合は `start_num` を調整するか、出力先を空にしてください（`ignore_error` も関連）。
 - **`experiment_subject`** により分岐します。主な値は次のとおりです。
   - **`membrane`** / **`nuclear`** … 通常の単独学習。入力は bf / df / ph の RGB（または HSV）。`use_rgb_balance` で **R,G,B 各チャンネルの比率画像（バランス）3ch**を、`use_rgb_chromatic` で **色差（差分）3ch**を、元画像に **連結して**追加できます（いずれも `blend=concatenate` かつ `use_list_length` が 1 または 3 のときのみ）。
-  - **`membrane_balance`** / **`nuclear_balance`** … 膜・核の単独学習だが、入力は **バランス画像のみ**（撮像法ごと 3ch を `use_list` に従い連結）。拡張データには `bf_bal` / `df_bal` / `ph_bal` が生成されます。**`use_rgb_balance` と `use_rgb_chromatic` はどちらも False** にしてください。
+  - **`membrane_balance`** / **`nuclear_balance`** … 入力は **RGB バランス（各撮像法 3ch）のみ**。データ拡張の出力は **`bf_bal` / `df_bal` / `ph_bal` と `y` のみ**（`bf` / `df` / `ph` フォルダは作りません）。マスターデータの `x/*.png` は拡張時の元画像として引き続き必須です。**`use_rgb_balance` と `use_rgb_chromatic` はどちらも False** にしてください。
   - **`both`** … 膜と核の同時学習。
   - **`membrane+`** / **`nuclear+`** … 相手側マスクを条件にした学習（`Dataset_experiment_plus`）。
 - 推論結果の保存先は、`membrane` と `membrane_balance` が `eval_data_membrane`、`nuclear` と `nuclear_balance` が `eval_data_nuclear` です（評価スクリプトのパス判断と整合します）。

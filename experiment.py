@@ -561,9 +561,10 @@ class Extraction:
         """
 
         # 保存先フォルダの作成
-        create_directory(f'{save_folder_path}/{BRIGHT_FIELD}')
-        create_directory(f'{save_folder_path}/{DARK_FIELD}')
-        create_directory(f'{save_folder_path}/{PHASE_CONTRAST}')
+        if self.experiment_subject not in _SUBJECT_BALANCE_ONLY:
+            create_directory(f'{save_folder_path}/{BRIGHT_FIELD}')
+            create_directory(f'{save_folder_path}/{DARK_FIELD}')
+            create_directory(f'{save_folder_path}/{PHASE_CONTRAST}')
         if self.experiment_subject in ('membrane', 'nuclear'):
             create_directory(f'{save_folder_path}/y')
             if self.use_rgb_balance:
@@ -589,10 +590,14 @@ class Extraction:
             raise Exception(f'実験対象が不正です。experiment_subject : {self.experiment_subject}')
 
         # 画像が既に存在する場合は実験中断の可能性があるため、エラーを出力
-        img_num = len(get_file_paths(f'{save_folder_path}/{BRIGHT_FIELD}'))
-        if not self.ignore_error and img_num>0:
-            logger.error(f'{save_folder_path}/{BRIGHT_FIELD} に画像が存在します。')
-            raise Exception(f'{save_folder_path}/{BRIGHT_FIELD} に画像が存在します。')
+        if self.experiment_subject in _SUBJECT_BALANCE_ONLY:
+            _exist_check_dir = f'{save_folder_path}/{BRIGHT_FIELD}_bal'
+        else:
+            _exist_check_dir = f'{save_folder_path}/{BRIGHT_FIELD}'
+        img_num = len(get_file_paths(_exist_check_dir))
+        if not self.ignore_error and img_num > 0:
+            logger.error(f'{_exist_check_dir} に画像が存在します。')
+            raise Exception(f'{_exist_check_dir} に画像が存在します。')
 
         for img_path in get_file_paths(img_folder_path):
             # 画像の読み込み
@@ -661,9 +666,10 @@ class Extraction:
                 img_list = image_processing.random_value(img_list, self.value_mag)
                 img_list = image_processing.random_saturation(img_list, self.saturation_mag)
                 img_list = image_processing.random_contrast(img_list, self.contrast_mag)
-                cv2.imwrite(f'{save_folder_path}/{BRIGHT_FIELD}/{img_num:05d}.png', img_list[0])
-                cv2.imwrite(f'{save_folder_path}/{DARK_FIELD}/{img_num:05d}.png', img_list[1])
-                cv2.imwrite(f'{save_folder_path}/{PHASE_CONTRAST}/{img_num:05d}.png', img_list[2])
+                if self.experiment_subject not in _SUBJECT_BALANCE_ONLY:
+                    cv2.imwrite(f'{save_folder_path}/{BRIGHT_FIELD}/{img_num:05d}.png', img_list[0])
+                    cv2.imwrite(f'{save_folder_path}/{DARK_FIELD}/{img_num:05d}.png', img_list[1])
+                    cv2.imwrite(f'{save_folder_path}/{PHASE_CONTRAST}/{img_num:05d}.png', img_list[2])
                 gen_balance = self.experiment_subject in _SUBJECT_BALANCE_ONLY or (
                     self.experiment_subject in ('membrane', 'nuclear') and self.use_rgb_balance
                 )
@@ -796,6 +802,12 @@ class Extraction:
 
         if self.use_autocast:
             self.scaler = GradScaler()
+
+        if len(self.train_path_list) == 0:
+            raise RuntimeError(
+                '学習に使う train_data サブフォルダが0個です（テスト・検証の除外後）。'
+                f' data_set_folder_path_list の数={len(self.data_set_folder_path_list)}, roop_num={self.roop_num} を確認してください。'
+            )
 
         # Data loader
         if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:

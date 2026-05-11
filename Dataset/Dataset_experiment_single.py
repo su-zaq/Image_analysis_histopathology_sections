@@ -48,18 +48,42 @@ class Dataset(data.Dataset):
         if use_balance_input_only and (use_rgb_balance or use_rgb_chromatic):
             raise Exception('use_balance_input_only 時は use_rgb_balance / use_rgb_chromatic と併用できません。')
         for path in folder_path:
-            self.bf_img_paths += self._get_file_path(path+'/bf')
-            self.df_img_paths += self._get_file_path(path+'/df')
-            self.ph_img_paths += self._get_file_path(path+'/ph')
-            if use_rgb_balance or use_balance_input_only:
+            if use_balance_input_only:
                 self.bf_bal_img_paths += self._get_file_path(path + '/bf_bal')
                 self.df_bal_img_paths += self._get_file_path(path + '/df_bal')
                 self.ph_bal_img_paths += self._get_file_path(path + '/ph_bal')
-            if use_rgb_chromatic:
-                self.bf_cdiff_img_paths += self._get_file_path(path + '/bf_cdiff')
-                self.df_cdiff_img_paths += self._get_file_path(path + '/df_cdiff')
-                self.ph_cdiff_img_paths += self._get_file_path(path + '/ph_cdiff')
-            self.y_img_paths += self._get_file_path(path+'/y')
+                self.y_img_paths += self._get_file_path(path + '/y')
+            else:
+                self.bf_img_paths += self._get_file_path(path+'/bf')
+                self.df_img_paths += self._get_file_path(path+'/df')
+                self.ph_img_paths += self._get_file_path(path+'/ph')
+                if use_rgb_balance:
+                    self.bf_bal_img_paths += self._get_file_path(path + '/bf_bal')
+                    self.df_bal_img_paths += self._get_file_path(path + '/df_bal')
+                    self.ph_bal_img_paths += self._get_file_path(path + '/ph_bal')
+                if use_rgb_chromatic:
+                    self.bf_cdiff_img_paths += self._get_file_path(path + '/bf_cdiff')
+                    self.df_cdiff_img_paths += self._get_file_path(path + '/df_cdiff')
+                    self.ph_cdiff_img_paths += self._get_file_path(path + '/ph_cdiff')
+                self.y_img_paths += self._get_file_path(path+'/y')
+        if use_balance_input_only:
+            n = len(self.y_img_paths)
+            if n == 0:
+                raise ValueError(
+                    '学習用データが0枚です（y/ または *_bal/ が空）。'
+                    f' folder_path={folder_path!r}。membrane_balance / nuclear_balance 用に bf_bal, df_bal, ph_bal と y を用意してください。'
+                )
+            if len(self.bf_bal_img_paths) != n or len(self.df_bal_img_paths) != n or len(self.ph_bal_img_paths) != n:
+                raise ValueError(
+                    f'y と *_bal の枚数が一致しません (y={n}, bf_bal={len(self.bf_bal_img_paths)}, '
+                    f'df_bal={len(self.df_bal_img_paths)}, ph_bal={len(self.ph_bal_img_paths)})。folder_path={folder_path!r}'
+                )
+        elif len(self.bf_img_paths) == 0:
+            raise ValueError(
+                '学習用画像が0枚です（いずれのフォルダの bf/ にもファイルがありません）。'
+                f' folder_path={folder_path!r}。'
+                'default_path/train_data 以下へデータ拡張が完了しているか確認してください。'
+            )
         self.use_list = use_list
         self.color = color
         self.blend = blend
@@ -69,9 +93,9 @@ class Dataset(data.Dataset):
             raise Exception('use_balance_input_only 時は blend=concatenate かつ use_list の長さ 3 である必要があります。')
         if (use_rgb_balance or use_rgb_chromatic) and (blend != 'concatenate' or len(use_list) != 3):
             raise Exception('use_rgb_balance / use_rgb_chromatic 時は blend=concatenate かつ use_list の長さ 3 である必要があります。')
-        if (use_rgb_balance or use_balance_input_only) and len(self.bf_img_paths) != len(self.bf_bal_img_paths):
+        if not use_balance_input_only and use_rgb_balance and len(self.bf_img_paths) != len(self.bf_bal_img_paths):
             raise Exception('bf と bf_bal の枚数が一致しません。')
-        if use_rgb_chromatic and len(self.bf_img_paths) != len(self.bf_cdiff_img_paths):
+        if not use_balance_input_only and use_rgb_chromatic and len(self.bf_img_paths) != len(self.bf_cdiff_img_paths):
             raise Exception('bf と bf_cdiff の枚数が一致しません。')
 
         if blend == 'alpha' and len(use_list)!=3:
@@ -183,6 +207,8 @@ class Dataset(data.Dataset):
             return cv2.merge(img_list)
 
     def __len__(self):
+        if self.use_balance_input_only:
+            return len(self.y_img_paths)
         return len(self.bf_img_paths)
 
     def _get_file_path(self,path):
