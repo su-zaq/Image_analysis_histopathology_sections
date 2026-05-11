@@ -20,6 +20,7 @@ import configparser
 import json
 import time
 import os
+import pathlib
 
 from send_info_discord import discord_info
 
@@ -49,6 +50,29 @@ from VitLib_PyTorch.Network import U_Net, Nested_U_Net
 
 from Dataset import Dataset_experiment_both, Dataset_experiment_single, Dataset_experiment_plus
 from rgb_balance import rgb_balance_grayscale, rgb_chromatic_diff_grayscale
+
+
+def _count_image_files_in_dir(dir_path: str) -> int:
+    """VitLib の get_file_paths は「直下のサブフォルダ」だけ返す場合があるため、枚数確認はファイル数を直接数える。"""
+    p = pathlib.Path(dir_path).expanduser()
+    try:
+        p = p.resolve()
+    except OSError:
+        pass
+    if not p.is_dir():
+        return 0
+    return sum(1 for x in p.iterdir() if x.is_file())
+
+
+def imwrite_unicode(path: str, img: np.ndarray) -> None:
+    """cv2.imwrite の代替。Windows では非 ASCII を含むパスに imwrite が失敗することがある。"""
+    p = pathlib.Path(path).expanduser()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    ext = p.suffix.lower() if p.suffix else '.png'
+    ok, buf = cv2.imencode(ext, img)
+    if not ok:
+        raise RuntimeError(f'cv2.imencode に失敗しました: {p}')
+    p.write_bytes(buf.tobytes())
 
 # 撮像法名略称
 BRIGHT_FIELD = 'bf'
@@ -501,7 +525,7 @@ class Extraction:
             result = np.around(result / (self.radius_train+1), decimals=1)
         else:
             result = modify_line_width(img_thin, radius=self.radius_train)
-        cv2.imwrite(out_path, result*255)
+        imwrite_unicode(out_path, result*255)
 
     def make_ans_img_membrane(self, img_folder_path:str) -> None:
         """細線化の正解画像から学習用の正解画像を作成する関数
@@ -528,9 +552,9 @@ class Extraction:
         ans_img = cv2.imread(in_ans_path, cv2.IMREAD_GRAYSCALE)
         bf_img = cv2.imread(in_bf_path, cv2.IMREAD_COLOR)
         result = make_nuclear_evaluate_images(ans_img, bf_img, self.care_rate, self.lower_ratio, self.higher_ratio)
-        cv2.imwrite(out_eval_img_path, result['eval_img'])
-        cv2.imwrite(out_red_img, result['red_img'])
-        cv2.imwrite(out_green_img, result['green_img'])
+        imwrite_unicode(out_eval_img_path, result['eval_img'])
+        imwrite_unicode(out_red_img, result['red_img'])
+        imwrite_unicode(out_green_img, result['green_img'])
 
     def make_ans_img_nuclear(self, img_folder_path:str) -> None:
         """核の正解画像と明視野画像からDon't care画像を作成する関数
@@ -594,12 +618,20 @@ class Extraction:
             _exist_check_dir = f'{save_folder_path}/{BRIGHT_FIELD}_bal'
         else:
             _exist_check_dir = f'{save_folder_path}/{BRIGHT_FIELD}'
-        img_num = len(get_file_paths(_exist_check_dir))
+        img_num = _count_image_files_in_dir(_exist_check_dir)
         if not self.ignore_error and img_num > 0:
             logger.error(f'{_exist_check_dir} に画像が存在します。')
             raise Exception(f'{_exist_check_dir} に画像が存在します。')
 
-        for img_path in get_file_paths(img_folder_path):
+        img_subfolders = get_file_paths(img_folder_path)
+        if len(img_subfolders) == 0:
+            raise RuntimeError(
+                f'proc_img: マスタ側に画像組フォルダがありません: get_file_paths({img_folder_path!r}) が空です。'
+                f'README のとおり、各標本フォルダ直下に x/, y_membrane/ 等がある「画像組」サブフォルダを1つ以上置いてください。'
+                f' save_folder_path={save_folder_path!r}'
+            )
+
+        for img_path in img_subfolders:
             # 画像の読み込み
             logger.info(f'{img_path} の画像を作成中')
             bf_img = cv2.imread(f'{img_path}/x/{BRIGHT_FIELD}.png', cv2.IMREAD_COLOR)
@@ -623,11 +655,17 @@ class Extraction:
                     ans_img = cv2.imread(f'{img_path}/y_membrane/ans.png', cv2.IMREAD_GRAYSCALE)
                 else:
                     ans_img = cv2.imread(f'{img_path}/y_membrane/ans_nograd.png', cv2.IMREAD_GRAYSCALE)
+                if ans_img is None:
+                    p = f'{img_path}/y_membrane/ans.png' if self.gradation else f'{img_path}/y_membrane/ans_nograd.png'
+                    raise Exception(f'正解画像を読み込めませんでした（make_ans_img 等の事前準備を確認）: {p}')
             elif self.experiment_subject in _SUBJECT_NUCLEAR_FAMILY:
                 if self.train_dont_care:
                     ans_img = cv2.imread(f'{img_path}/y_nuclear/ans.png', cv2.IMREAD_GRAYSCALE)
                 else:
                     ans_img = cv2.imread(f'{img_path}/y_nuclear/green.png', cv2.IMREAD_GRAYSCALE)
+                if ans_img is None:
+                    p = f'{img_path}/y_nuclear/ans.png' if self.train_dont_care else f'{img_path}/y_nuclear/green.png'
+                    raise Exception(f'正解画像を読み込めませんでした: {p}')
             elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 if self.gradation:
                     ans_mem_img = cv2.imread(f'{img_path}/y_membrane/ans.png', cv2.IMREAD_GRAYSCALE)
@@ -667,9 +705,9 @@ class Extraction:
                 img_list = image_processing.random_saturation(img_list, self.saturation_mag)
                 img_list = image_processing.random_contrast(img_list, self.contrast_mag)
                 if self.experiment_subject not in _SUBJECT_BALANCE_ONLY:
-                    cv2.imwrite(f'{save_folder_path}/{BRIGHT_FIELD}/{img_num:05d}.png', img_list[0])
-                    cv2.imwrite(f'{save_folder_path}/{DARK_FIELD}/{img_num:05d}.png', img_list[1])
-                    cv2.imwrite(f'{save_folder_path}/{PHASE_CONTRAST}/{img_num:05d}.png', img_list[2])
+                    imwrite_unicode(f'{save_folder_path}/{BRIGHT_FIELD}/{img_num:05d}.png', img_list[0])
+                    imwrite_unicode(f'{save_folder_path}/{DARK_FIELD}/{img_num:05d}.png', img_list[1])
+                    imwrite_unicode(f'{save_folder_path}/{PHASE_CONTRAST}/{img_num:05d}.png', img_list[2])
                 gen_balance = self.experiment_subject in _SUBJECT_BALANCE_ONLY or (
                     self.experiment_subject in ('membrane', 'nuclear') and self.use_rgb_balance
                 )
@@ -683,23 +721,41 @@ class Extraction:
                         if gen_balance:
                             bb, gg, rr = rgb_balance_grayscale(raw)
                             bal_bgr = cv2.merge([bb, gg, rr])
-                            cv2.imwrite(f'{save_folder_path}/{sub}_bal/{img_num:05d}.png', bal_bgr)
+                            imwrite_unicode(f'{save_folder_path}/{sub}_bal/{img_num:05d}.png', bal_bgr)
                         if gen_cdiff:
                             rb, gb, rg = rgb_chromatic_diff_grayscale(raw)
                             cd_bgr = cv2.merge([rb, gb, rg])
-                            cv2.imwrite(f'{save_folder_path}/{sub}_cdiff/{img_num:05d}.png', cd_bgr)
+                            imwrite_unicode(f'{save_folder_path}/{sub}_cdiff/{img_num:05d}.png', cd_bgr)
                 if self.experiment_subject in ('membrane', 'nuclear') or self.experiment_subject in _SUBJECT_BALANCE_ONLY:
-                    cv2.imwrite(f'{save_folder_path}/y/{img_num:05d}.png', img_list[3])
+                    imwrite_unicode(f'{save_folder_path}/y/{img_num:05d}.png', img_list[3])
                 elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
-                    cv2.imwrite(f'{save_folder_path}/y_membrane/{img_num:05d}.png', img_list[3])
-                    cv2.imwrite(f'{save_folder_path}/y_nuclear/{img_num:05d}.png', img_list[4])
+                    imwrite_unicode(f'{save_folder_path}/y_membrane/{img_num:05d}.png', img_list[3])
+                    imwrite_unicode(f'{save_folder_path}/y_nuclear/{img_num:05d}.png', img_list[4])
                 elif self.experiment_subject == 'both':
-                    cv2.imwrite(f'{save_folder_path}/y_membrane/{img_num:05d}.png', img_list[3])
-                    cv2.imwrite(f'{save_folder_path}/y_nuclear/{img_num:05d}.png', img_list[4])
+                    imwrite_unicode(f'{save_folder_path}/y_membrane/{img_num:05d}.png', img_list[3])
+                    imwrite_unicode(f'{save_folder_path}/y_nuclear/{img_num:05d}.png', img_list[4])
                 else:
                     raise Exception(f'実験対象が不正です。experiment_subject : {self.experiment_subject}')
                 img_num += 1
             logger.info(f'{img_path} の画像の作成完了')
+
+        if self.experiment_subject in _SUBJECT_BALANCE_ONLY or self.experiment_subject in ('membrane', 'nuclear'):
+            ny = _count_image_files_in_dir(f'{save_folder_path}/y')
+            if ny == 0:
+                raise RuntimeError(
+                    f'proc_img: 学習用画像が1枚も出力されませんでした: {save_folder_path}/y/ 。'
+                    f'マスタ {img_folder_path} 直下の画像組フォルダと正解パスを確認してください。'
+                )
+        elif self.experiment_subject in ('membrane+', 'nuclear+'):
+            for sub, name in (('y_membrane', '膜'), ('y_nuclear', '核')):
+                n = _count_image_files_in_dir(f'{save_folder_path}/{sub}')
+                if n == 0:
+                    raise RuntimeError(f'proc_img: {save_folder_path}/{sub}/ が空です（{name}）。')
+        elif self.experiment_subject == 'both':
+            for sub, name in (('y_membrane', '膜'), ('y_nuclear', '核')):
+                n = _count_image_files_in_dir(f'{save_folder_path}/{sub}')
+                if n == 0:
+                    raise RuntimeError(f'proc_img: {save_folder_path}/{sub}/ が空です（{name}）。')
 
     def get_use_list(self, n:int, length:int) -> list:
         """use_listを生成する関数

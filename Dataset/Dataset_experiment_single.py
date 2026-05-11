@@ -47,31 +47,40 @@ class Dataset(data.Dataset):
         self.use_balance_input_only = use_balance_input_only
         if use_balance_input_only and (use_rgb_balance or use_rgb_chromatic):
             raise Exception('use_balance_input_only 時は use_rgb_balance / use_rgb_chromatic と併用できません。')
-        for path in folder_path:
+        for raw in folder_path:
+            root = pathlib.Path(raw).expanduser()
+            try:
+                root = root.resolve()
+            except OSError:
+                pass
             if use_balance_input_only:
-                self.bf_bal_img_paths += self._get_file_path(path + '/bf_bal')
-                self.df_bal_img_paths += self._get_file_path(path + '/df_bal')
-                self.ph_bal_img_paths += self._get_file_path(path + '/ph_bal')
-                self.y_img_paths += self._get_file_path(path + '/y')
+                self.bf_bal_img_paths += self._get_file_path(root / 'bf_bal')
+                self.df_bal_img_paths += self._get_file_path(root / 'df_bal')
+                self.ph_bal_img_paths += self._get_file_path(root / 'ph_bal')
+                self.y_img_paths += self._get_file_path(root / 'y')
             else:
-                self.bf_img_paths += self._get_file_path(path+'/bf')
-                self.df_img_paths += self._get_file_path(path+'/df')
-                self.ph_img_paths += self._get_file_path(path+'/ph')
+                self.bf_img_paths += self._get_file_path(root / 'bf')
+                self.df_img_paths += self._get_file_path(root / 'df')
+                self.ph_img_paths += self._get_file_path(root / 'ph')
                 if use_rgb_balance:
-                    self.bf_bal_img_paths += self._get_file_path(path + '/bf_bal')
-                    self.df_bal_img_paths += self._get_file_path(path + '/df_bal')
-                    self.ph_bal_img_paths += self._get_file_path(path + '/ph_bal')
+                    self.bf_bal_img_paths += self._get_file_path(root / 'bf_bal')
+                    self.df_bal_img_paths += self._get_file_path(root / 'df_bal')
+                    self.ph_bal_img_paths += self._get_file_path(root / 'ph_bal')
                 if use_rgb_chromatic:
-                    self.bf_cdiff_img_paths += self._get_file_path(path + '/bf_cdiff')
-                    self.df_cdiff_img_paths += self._get_file_path(path + '/df_cdiff')
-                    self.ph_cdiff_img_paths += self._get_file_path(path + '/ph_cdiff')
-                self.y_img_paths += self._get_file_path(path+'/y')
+                    self.bf_cdiff_img_paths += self._get_file_path(root / 'bf_cdiff')
+                    self.df_cdiff_img_paths += self._get_file_path(root / 'df_cdiff')
+                    self.ph_cdiff_img_paths += self._get_file_path(root / 'ph_cdiff')
+                self.y_img_paths += self._get_file_path(root / 'y')
         if use_balance_input_only:
             n = len(self.y_img_paths)
             if n == 0:
+                diag = self._diagnose_balance_folders(folder_path)
                 raise ValueError(
-                    '学習用データが0枚です（y/ または *_bal/ が空）。'
-                    f' folder_path={folder_path!r}。membrane_balance / nuclear_balance 用に bf_bal, df_bal, ph_bal と y を用意してください。'
+                    '学習用データが0枚です（y/ が空、または学習セットのパスに到達できていません）。\n'
+                    'membrane_balance / nuclear_balance では各 train_data 配下に bf_bal, df_bal, ph_bal, y が必要です。\n'
+                    f'【診断】\n{diag}\n'
+                    f'folder_path={folder_path!r}\n'
+                    '対処: start_num=0 で拡張画像を生成し直す（同一 default_path に log/exp.log があるとブロックされる場合は別出力先にするか削除）。'
                 )
             if len(self.bf_bal_img_paths) != n or len(self.df_bal_img_paths) != n or len(self.ph_bal_img_paths) != n:
                 raise ValueError(
@@ -211,11 +220,37 @@ class Dataset(data.Dataset):
             return len(self.y_img_paths)
         return len(self.bf_img_paths)
 
-    def _get_file_path(self,path):
-        folder_path = pathlib.Path(path)
-        img_path = list(folder_path.glob('*'))
-        img_path = [str(path) for path in img_path]
-        return img_path
+    def _diagnose_balance_folders(self, folder_path) -> str:
+        lines = []
+        for raw in folder_path:
+            root = pathlib.Path(raw).expanduser()
+            try:
+                root = root.resolve()
+            except OSError:
+                pass
+            lines.append(f'セット: {raw} -> resolve: {root}')
+            if not root.is_dir():
+                lines.append('             [このパスにディレクトリがありません。カレントディレクトリからの相対パスを確認してください]')
+                continue
+            for name in ('y', 'bf_bal', 'df_bal', 'ph_bal'):
+                d = root / name
+                if not d.is_dir():
+                    lines.append(f'             {name}/ : (なし)')
+                else:
+                    n = sum(1 for x in d.iterdir() if x.is_file())
+                    lines.append(f'             {name}/ : {n} ファイル')
+        return '\n'.join(lines)
+
+    def _get_file_path(self, dir_path) -> list:
+        base = pathlib.Path(dir_path).expanduser()
+        try:
+            base = base.resolve()
+        except OSError:
+            pass
+        if not base.is_dir():
+            return []
+        files = sorted((p for p in base.iterdir() if p.is_file()), key=lambda p: p.name)
+        return [str(p) for p in files]
 
 def get_dataloader(folder_path, use_list, color='RGB', blend='concatenate', batch_size = 1, num_workers=0, isShuffle=True, pin_memory=True, use_rgb_balance: bool = False, use_rgb_chromatic: bool = False, use_balance_input_only: bool = False):
     dataset = Dataset(folder_path, use_list, color=color, blend=blend, use_rgb_balance=use_rgb_balance, use_rgb_chromatic=use_rgb_chromatic, use_balance_input_only=use_balance_input_only)
