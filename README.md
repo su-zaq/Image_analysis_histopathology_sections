@@ -55,7 +55,12 @@ pip install pandas opencv-python-headless pillow tqdm
 
 - パラメータはクラス `Extraction` の引数、または **INI 形式の設定ファイル**（`--config` / `-c`）で指定します。
 - 初回（`start_num == 0`）は `default_path` 下にログ等を作成します。既に `log/exp.log` があると再実行で例外になるため、続きから回す場合は `start_num` を調整するか、出力先を空にしてください（`ignore_error` も関連）。
-- 膜・核・同時学習・条件付き（`membrane+` / `nuclear+`）など **`experiment_subject`** により分岐します。
+- **`experiment_subject`** により分岐します。主な値は次のとおりです。
+  - **`membrane`** / **`nuclear`** … 通常の単独学習。入力は bf / df / ph の RGB（または HSV）。`use_rgb_balance` で **R,G,B 各チャンネルの比率画像（バランス）3ch**を、`use_rgb_chromatic` で **色差（差分）3ch**を、元画像に **連結して**追加できます（いずれも `blend=concatenate` かつ `use_list_length` が 1 または 3 のときのみ）。
+  - **`membrane_balance`** / **`nuclear_balance`** … 膜・核の単独学習だが、入力は **バランス画像のみ**（撮像法ごと 3ch を `use_list` に従い連結）。拡張データには `bf_bal` / `df_bal` / `ph_bal` が生成されます。**`use_rgb_balance` と `use_rgb_chromatic` はどちらも False** にしてください。
+  - **`both`** … 膜と核の同時学習。
+  - **`membrane+`** / **`nuclear+`** … 相手側マスクを条件にした学習（`Dataset_experiment_plus`）。
+- 推論結果の保存先は、`membrane` と `membrane_balance` が `eval_data_membrane`、`nuclear` と `nuclear_balance` が `eval_data_nuclear` です（評価スクリプトのパス判断と整合します）。
 - **epoch 20** でモデルを `result/.../model/expXXXX_testYY_epoch20.pth` 形式で保存。各 epoch 終了後、検証・テスト画像の保存、および **`./test/x` 直下の画像**に対する外部推論（`result/.../external_pred/...`）が走ります（フォルダが無い・画像が無い場合はスキップログ）。
 
 ```bash
@@ -77,6 +82,8 @@ python evaluation.py -c your_config.ini
 
 ## 学習・推論まわりの用語
 
+- **RGB バランス** … `rgb_balance.py` の `rgb_balance_grayscale` により、各画素で R/(R+G+B), G/(…), B/(…) を 8bit 化した 3ch 画像。通常モードでは `use_rgb_balance=True` のとき元 RGB に連結され、`membrane_balance` / `nuclear_balance` では **これのみ**がネット入力になります。
+- **色差チャンネル** … 同モジュールの `rgb_chromatic_diff_grayscale` による (R−G)/(R+G+B) 等の 3ch。`use_rgb_chromatic=True` のときのみ元画像に連結（`membrane` / `nuclear` 単独時）。
 - **撮像法の組み合わせ** … `use_list` で bf / df / ph の採用を 0/1 で指定。`concatenate` なら有効チャンネルを連結、`alpha` なら比率ブレンド（`blend_particle_size` で刻み）です。
 - **`use_list_length`** … 1 / 3 / 9 / 18 で「撮像法のみ」「色チャンネル単位」等の違いを切り替え（制約は `experiment.py` 内の assert 参照）。
 - **`compress_rate`** … 保存する予測グレースケールを画素値の刻み幅で量子化（実験クラスの `image_compression_save`）。

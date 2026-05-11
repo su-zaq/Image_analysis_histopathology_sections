@@ -9,7 +9,16 @@ import numpy as np
 from rgb_balance import rgb_balance_grayscale, rgb_chromatic_diff_grayscale
 
 class Dataset(data.Dataset):
-    def __init__(self, folder_path, use_list, color='RGB', blend='concatenate', use_rgb_balance: bool = False, use_rgb_chromatic: bool = False):
+    def __init__(
+        self,
+        folder_path,
+        use_list,
+        color='RGB',
+        blend='concatenate',
+        use_rgb_balance: bool = False,
+        use_rgb_chromatic: bool = False,
+        use_balance_input_only: bool = False,
+    ):
         """
         Args:
             folder_path (list): 画像フォルダのパス
@@ -35,11 +44,14 @@ class Dataset(data.Dataset):
         self.y_img_paths = []
         self.use_rgb_balance = use_rgb_balance
         self.use_rgb_chromatic = use_rgb_chromatic
+        self.use_balance_input_only = use_balance_input_only
+        if use_balance_input_only and (use_rgb_balance or use_rgb_chromatic):
+            raise Exception('use_balance_input_only 時は use_rgb_balance / use_rgb_chromatic と併用できません。')
         for path in folder_path:
             self.bf_img_paths += self._get_file_path(path+'/bf')
             self.df_img_paths += self._get_file_path(path+'/df')
             self.ph_img_paths += self._get_file_path(path+'/ph')
-            if use_rgb_balance:
+            if use_rgb_balance or use_balance_input_only:
                 self.bf_bal_img_paths += self._get_file_path(path + '/bf_bal')
                 self.df_bal_img_paths += self._get_file_path(path + '/df_bal')
                 self.ph_bal_img_paths += self._get_file_path(path + '/ph_bal')
@@ -53,9 +65,11 @@ class Dataset(data.Dataset):
         self.blend = blend
         self.to_tensor = torchvision.transforms.ToTensor()
 
+        if use_balance_input_only and (blend != 'concatenate' or len(use_list) != 3):
+            raise Exception('use_balance_input_only 時は blend=concatenate かつ use_list の長さ 3 である必要があります。')
         if (use_rgb_balance or use_rgb_chromatic) and (blend != 'concatenate' or len(use_list) != 3):
             raise Exception('use_rgb_balance / use_rgb_chromatic 時は blend=concatenate かつ use_list の長さ 3 である必要があります。')
-        if use_rgb_balance and len(self.bf_img_paths) != len(self.bf_bal_img_paths):
+        if (use_rgb_balance or use_balance_input_only) and len(self.bf_img_paths) != len(self.bf_bal_img_paths):
             raise Exception('bf と bf_bal の枚数が一致しません。')
         if use_rgb_chromatic and len(self.bf_img_paths) != len(self.bf_cdiff_img_paths):
             raise Exception('bf と bf_cdiff の枚数が一致しません。')
@@ -89,13 +103,22 @@ class Dataset(data.Dataset):
         if self.blend == 'concatenate':
             img_list = []
             if len(self.use_list)==3:#撮像法のみの検討
-                if self.use_list[0]==1:
-                    img_list.append(self._append_rgb_extra_channels(self.bf_img_paths, index))
-                if self.use_list[1]==1:
-                    img_list.append(self._append_rgb_extra_channels(self.df_img_paths, index))
-                if self.use_list[2]==1:
-                    img_list.append(self._append_rgb_extra_channels(self.ph_img_paths, index))
-                x = np.concatenate(img_list, axis=2) if (self.use_rgb_balance or self.use_rgb_chromatic) else cv2.merge(img_list)
+                if self.use_balance_input_only:
+                    if self.use_list[0]==1:
+                        img_list.append(self._get_image(self.bf_bal_img_paths, index, self.color))
+                    if self.use_list[1]==1:
+                        img_list.append(self._get_image(self.df_bal_img_paths, index, self.color))
+                    if self.use_list[2]==1:
+                        img_list.append(self._get_image(self.ph_bal_img_paths, index, self.color))
+                    x = np.concatenate(img_list, axis=2)
+                else:
+                    if self.use_list[0]==1:
+                        img_list.append(self._append_rgb_extra_channels(self.bf_img_paths, index))
+                    if self.use_list[1]==1:
+                        img_list.append(self._append_rgb_extra_channels(self.df_img_paths, index))
+                    if self.use_list[2]==1:
+                        img_list.append(self._append_rgb_extra_channels(self.ph_img_paths, index))
+                    x = np.concatenate(img_list, axis=2) if (self.use_rgb_balance or self.use_rgb_chromatic) else cv2.merge(img_list)
             elif len(self.use_list)==9:#色空間毎の検討
                 if 1 in self.use_list[0:3]:
                     img_list.append(self._get_image(self.bf_img_paths, index, self.color, self.use_list[0:3]))
@@ -168,8 +191,8 @@ class Dataset(data.Dataset):
         img_path = [str(path) for path in img_path]
         return img_path
 
-def get_dataloader(folder_path, use_list, color='RGB', blend='concatenate', batch_size = 1, num_workers=0, isShuffle=True, pin_memory=True, use_rgb_balance: bool = False, use_rgb_chromatic: bool = False):
-    dataset = Dataset(folder_path, use_list, color=color, blend=blend, use_rgb_balance=use_rgb_balance, use_rgb_chromatic=use_rgb_chromatic)
+def get_dataloader(folder_path, use_list, color='RGB', blend='concatenate', batch_size = 1, num_workers=0, isShuffle=True, pin_memory=True, use_rgb_balance: bool = False, use_rgb_chromatic: bool = False, use_balance_input_only: bool = False):
+    dataset = Dataset(folder_path, use_list, color=color, blend=blend, use_rgb_balance=use_rgb_balance, use_rgb_chromatic=use_rgb_chromatic, use_balance_input_only=use_balance_input_only)
     return data.DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=isShuffle, pin_memory=pin_memory)
 
 def _get_image(img_path, color, use_list=None):
@@ -217,10 +240,32 @@ def _apply_rgb_extras_numpy(
         im = np.concatenate([im, imc], axis=2)
     return im
 
-def get_image(img_path_list, use_list, color='RGB', blend='concatenate', use_rgb_balance: bool = False, use_rgb_chromatic: bool = False):
+def _balance_only_from_bgr(bgr: np.ndarray, color: str) -> np.ndarray:
+    bb, gg, rr = rgb_balance_grayscale(bgr)
+    bal_bgr = cv2.merge([bb, gg, rr])
+    if color == 'RGB':
+        return cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB)
+    return cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV)
+
+
+def get_image(img_path_list, use_list, color='RGB', blend='concatenate', use_rgb_balance: bool = False, use_rgb_chromatic: bool = False, use_balance_input_only: bool = False):
     if blend == 'concatenate':
         img_list = []
         if len(use_list)==3:#撮像法のみの検討
+            if use_balance_input_only:
+                if use_list[0]==1:
+                    bgr0 = cv2.imread(img_path_list[0], cv2.IMREAD_COLOR)
+                    img_list.append(_balance_only_from_bgr(bgr0, color))
+                if use_list[1]==1:
+                    bgr1 = cv2.imread(img_path_list[1], cv2.IMREAD_COLOR)
+                    img_list.append(_balance_only_from_bgr(bgr1, color))
+                if use_list[2]==1:
+                    bgr2 = cv2.imread(img_path_list[2], cv2.IMREAD_COLOR)
+                    img_list.append(_balance_only_from_bgr(bgr2, color))
+                img = np.concatenate(img_list, axis=2)
+                img = torchvision.transforms.ToTensor()(img)
+                img = torch.reshape(img, (-1, *img.size()))
+                return img
             if use_list[0]==1:
                 im0 = _get_image(img_path_list[0], color)
                 if use_rgb_balance or use_rgb_chromatic:

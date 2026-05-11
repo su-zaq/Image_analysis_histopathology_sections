@@ -55,6 +55,11 @@ BRIGHT_FIELD = 'bf'
 DARK_FIELD = 'df'
 PHASE_CONTRAST = 'ph'
 
+_SUBJECT_MEMBRANE_FAMILY = ('membrane', 'membrane_balance')
+_SUBJECT_NUCLEAR_FAMILY = ('nuclear', 'nuclear_balance')
+_SUBJECT_BALANCE_ONLY = ('membrane_balance', 'nuclear_balance')
+_SUBJECT_SINGLE_NET_OUT1 = ('membrane', 'nuclear', 'membrane_balance', 'nuclear_balance')
+
 class Extraction:
     def __init__(
             self,
@@ -103,7 +108,7 @@ class Extraction:
         #### 膜マスクを使用して核を抽出
         #### 核マスクを使用して膜を抽出 
         self.experiment_subject = experiment_subject
-        assert self.experiment_subject in ['membrane', 'nuclear', 'both', 'nuclear+', 'membrane+'], f'実験対象が不正です。experiment_subject : {self.experiment_subject}'
+        assert self.experiment_subject in ['membrane', 'nuclear', 'both', 'nuclear+', 'membrane+', 'membrane_balance', 'nuclear_balance'], f'実験対象が不正です。experiment_subject : {self.experiment_subject}'
 
         self.use_rgb_balance = use_rgb_balance
         self.use_rgb_chromatic = use_rgb_chromatic
@@ -129,12 +134,12 @@ class Extraction:
 
         ### 細胞膜の正解画像の膨張時にグラデーションにするか、しないか
         ### マスク学習時もグラデーションにするか，しないか
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'both' or self.experiment_subject == 'nuclear+' or self.experiment_subject == 'membrane+':
+        if self.experiment_subject in _SUBJECT_MEMBRANE_FAMILY or self.experiment_subject == 'both' or self.experiment_subject == 'nuclear+' or self.experiment_subject == 'membrane+':
             self.gradation = gradation
 
         ### 細胞核の学習画像にDon't careを含むかどうか
         ### マスク学習時はDon't careを含むかどうか
-        if self.experiment_subject == 'nuclear' or self.experiment_subject == 'both' or self.experiment_subject == 'nuclear+' or self.experiment_subject == 'membrane+':
+        if self.experiment_subject in _SUBJECT_NUCLEAR_FAMILY or self.experiment_subject == 'both' or self.experiment_subject == 'nuclear+' or self.experiment_subject == 'membrane+':
             self.train_dont_care = train_dont_care
             self.care_rate = care_rate
             self.lower_ratio = lower_ratio
@@ -174,6 +179,14 @@ class Extraction:
             assert self.blend == 'concatenate' and self.use_list_length in (1, 3), (
                 'use_rgb_balance / use_rgb_chromatic 時は blend=concatenate かつ use_list_length は 1 または 3 である必要があります。'
                 '(1=撮像法を1系統ずつ試す実験、3=bf/df/phのあり/なしをビットで切替)'
+            )
+        if self.experiment_subject in _SUBJECT_BALANCE_ONLY:
+            assert not self.use_rgb_balance and not self.use_rgb_chromatic, (
+                'membrane_balance / nuclear_balance では use_rgb_balance / use_rgb_chromatic は False にしてください。'
+                '入力は RGB バランス画像のみです。'
+            )
+            assert self.blend == 'concatenate' and self.use_list_length in (1, 3), (
+                'membrane_balance / nuclear_balance 時は blend=concatenate かつ use_list_length は 1 または 3 である必要があります。'
             )
 
         ### 学習に使用する元の画像(1200px × 1600px)フォルダのパス
@@ -251,9 +264,9 @@ class Extraction:
         elif self.start_num == 0:
             raise Exception(self.default_path + '/log/exp.logは存在します。')
         ## 推論結果画像の保存先
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'membrane+':
+        if self.experiment_subject in _SUBJECT_MEMBRANE_FAMILY or self.experiment_subject == 'membrane+':
             self.save_image_path = self.set_path(self.default_path + f'/eval_data_membrane/')
-        elif self.experiment_subject == 'nuclear' or self.experiment_subject == 'nuclear+':
+        elif self.experiment_subject in _SUBJECT_NUCLEAR_FAMILY or self.experiment_subject == 'nuclear+':
             self.save_image_path = self.set_path(self.default_path + f'/eval_data_nuclear/')
         elif self.experiment_subject == 'both':
             self.save_membrane_image_path = self.set_path(self.default_path + '/eval_data_membrane/')
@@ -292,11 +305,11 @@ class Extraction:
             #>> pathological_specimen_folder_stems = ['pathological_specimen_01', 'pathological_specimen_02', 'pathological_specimen_03', 'pathological_specimen_04']
 
             for folder_path, folder_stem in zip(self.pathological_specimen_folder_paths, pathological_specimen_folder_stems):
-                if self.experiment_subject == 'membrane':
+                if self.experiment_subject in _SUBJECT_MEMBRANE_FAMILY:
                     #細線化の正解から学習用の正解を作成する
                     logger.info(folder_path+' の細線化の正解画像から学習用の正解を作成開始')
                     self.make_ans_img_membrane(folder_path)
-                elif self.experiment_subject == 'nuclear':
+                elif self.experiment_subject in _SUBJECT_NUCLEAR_FAMILY:
                     #細胞核のDon't care画像を作成する。
                     logger.info(folder_path+' の核の正解画像から学習用の正解を作成開始')
                     self.make_ans_img_nuclear(folder_path)
@@ -390,9 +403,9 @@ class Extraction:
         logger.info(f'実験対象 : {self.experiment_subject}')
         logger.info(f'使用ネットワーク : {self.use_Network}')
         logger.info(f'使用色空間 : {self.color}')
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'both':
+        if self.experiment_subject in _SUBJECT_MEMBRANE_FAMILY or self.experiment_subject == 'both':
             logger.info(f'細胞膜の正解画像の膨張時にグラデーションにするか、しないか : {self.gradation}')
-        if self.experiment_subject == 'nuclear' or self.experiment_subject == 'both':
+        if self.experiment_subject in _SUBJECT_NUCLEAR_FAMILY or self.experiment_subject == 'both':
             logger.info(f'細胞核の学習画像にDon\'t careを含むかどうか : {self.train_dont_care}')
             logger.info(f'細胞核のDon\'t care画像の割合 : {self.care_rate}')
             logger.info(f'細胞核のDon\'t care画像の下限割合 : {self.lower_ratio}')
@@ -421,9 +434,11 @@ class Extraction:
         logger.info(f'エラーを無視するための設定 : {self.ignore_error}')
         if self.experiment_subject in ['membrane', 'nuclear']:
             logger.info(f'RGBバランスチャンネル追加 : {self.use_rgb_balance}, RGB色差チャンネル追加 : {self.use_rgb_chromatic}')
+        if self.experiment_subject in _SUBJECT_BALANCE_ONLY:
+            logger.info('入力チャンネル : RGB バランス画像のみ（撮像法ごと 3ch、use_list は従来どおり）')
         logger.info(f'学習時のデータ展開先フォルダ : {self.train_data_folder}')
         logger.info(f'ログ記録用フォルダ : {self.log_folder}')
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+        if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:
             logger.info(f'推論結果画像の保存先 : {self.save_image_path}')
         elif self.experiment_subject == 'both':
             logger.info(f'細胞膜の推論結果画像の保存先 : {self.save_membrane_image_path}')
@@ -549,7 +564,7 @@ class Extraction:
         create_directory(f'{save_folder_path}/{BRIGHT_FIELD}')
         create_directory(f'{save_folder_path}/{DARK_FIELD}')
         create_directory(f'{save_folder_path}/{PHASE_CONTRAST}')
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+        if self.experiment_subject in ('membrane', 'nuclear'):
             create_directory(f'{save_folder_path}/y')
             if self.use_rgb_balance:
                 create_directory(f'{save_folder_path}/{BRIGHT_FIELD}_bal')
@@ -559,6 +574,11 @@ class Extraction:
                 create_directory(f'{save_folder_path}/{BRIGHT_FIELD}_cdiff')
                 create_directory(f'{save_folder_path}/{DARK_FIELD}_cdiff')
                 create_directory(f'{save_folder_path}/{PHASE_CONTRAST}_cdiff')
+        elif self.experiment_subject in _SUBJECT_BALANCE_ONLY:
+            create_directory(f'{save_folder_path}/y')
+            create_directory(f'{save_folder_path}/{BRIGHT_FIELD}_bal')
+            create_directory(f'{save_folder_path}/{DARK_FIELD}_bal')
+            create_directory(f'{save_folder_path}/{PHASE_CONTRAST}_bal')
         elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
             create_directory(f'{save_folder_path}/y_membrane')
             create_directory(f'{save_folder_path}/y_nuclear')
@@ -593,16 +613,16 @@ class Extraction:
             if he_img is None:
                 raise Exception(f'画像の読み込みに失敗しました: {he_path}')
             
-            if self.experiment_subject == 'membrane':
+            if self.experiment_subject in _SUBJECT_MEMBRANE_FAMILY:
                 if self.gradation:
                     ans_img = cv2.imread(f'{img_path}/y_membrane/ans.png', cv2.IMREAD_GRAYSCALE)
                 else:
                     ans_img = cv2.imread(f'{img_path}/y_membrane/ans_nograd.png', cv2.IMREAD_GRAYSCALE)
-            elif self.experiment_subject == 'nuclear':
+            elif self.experiment_subject in _SUBJECT_NUCLEAR_FAMILY:
                 if self.train_dont_care:
-                    ans_img = cv2.imread(f'{img_path}/y_{self.experiment_subject}/ans.png', cv2.IMREAD_GRAYSCALE)
+                    ans_img = cv2.imread(f'{img_path}/y_nuclear/ans.png', cv2.IMREAD_GRAYSCALE)
                 else:
-                    ans_img = cv2.imread(f'{img_path}/y_{self.experiment_subject}/green.png', cv2.IMREAD_GRAYSCALE)
+                    ans_img = cv2.imread(f'{img_path}/y_nuclear/green.png', cv2.IMREAD_GRAYSCALE)
             elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 if self.gradation:
                     ans_mem_img = cv2.imread(f'{img_path}/y_membrane/ans.png', cv2.IMREAD_GRAYSCALE)
@@ -627,7 +647,7 @@ class Extraction:
             for i in range(self.data_augmentation_num):
                 if i % (self.data_augmentation_num//10) == 0:
                     logger.info(f'{i}/{self.data_augmentation_num} の画像を作成中...')
-                if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:
                     img_list = [bf_img, df_img, he_img, ans_img]
                 elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                     img_list = [bf_img, df_img, he_img, ans_mem_img, ans_nuc_img]
@@ -644,21 +664,25 @@ class Extraction:
                 cv2.imwrite(f'{save_folder_path}/{BRIGHT_FIELD}/{img_num:05d}.png', img_list[0])
                 cv2.imwrite(f'{save_folder_path}/{DARK_FIELD}/{img_num:05d}.png', img_list[1])
                 cv2.imwrite(f'{save_folder_path}/{PHASE_CONTRAST}/{img_num:05d}.png', img_list[2])
-                if self.experiment_subject in ('membrane', 'nuclear') and (self.use_rgb_balance or self.use_rgb_chromatic):
+                gen_balance = self.experiment_subject in _SUBJECT_BALANCE_ONLY or (
+                    self.experiment_subject in ('membrane', 'nuclear') and self.use_rgb_balance
+                )
+                gen_cdiff = self.experiment_subject in ('membrane', 'nuclear') and self.use_rgb_chromatic
+                if gen_balance or gen_cdiff:
                     for raw, sub in (
                         (img_list[0], BRIGHT_FIELD),
                         (img_list[1], DARK_FIELD),
                         (img_list[2], PHASE_CONTRAST),
                     ):
-                        if self.use_rgb_balance:
+                        if gen_balance:
                             bb, gg, rr = rgb_balance_grayscale(raw)
                             bal_bgr = cv2.merge([bb, gg, rr])
                             cv2.imwrite(f'{save_folder_path}/{sub}_bal/{img_num:05d}.png', bal_bgr)
-                        if self.use_rgb_chromatic:
+                        if gen_cdiff:
                             rb, gb, rg = rgb_chromatic_diff_grayscale(raw)
                             cd_bgr = cv2.merge([rb, gb, rg])
                             cv2.imwrite(f'{save_folder_path}/{sub}_cdiff/{img_num:05d}.png', cd_bgr)
-                if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                if self.experiment_subject in ('membrane', 'nuclear') or self.experiment_subject in _SUBJECT_BALANCE_ONLY:
                     cv2.imwrite(f'{save_folder_path}/y/{img_num:05d}.png', img_list[3])
                 elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                     cv2.imwrite(f'{save_folder_path}/y_membrane/{img_num:05d}.png', img_list[3])
@@ -721,7 +745,7 @@ class Extraction:
         self.current_in_channels = in_channels
 
         if self.use_Network == 'U-Net':
-            if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+            if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:
                 self.model = U_Net(in_channels, 1, bilinear=False).to(self.device, non_blocking=True)
             elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 self.model = U_Net(in_channels, 1, bilinear=False).to(self.device, non_blocking=True)
@@ -733,7 +757,7 @@ class Extraction:
             else:
                 raise Exception(f'実験対象が不正です。experiment_subject : {self.experiment_subject}')
         elif self.use_Network == 'U-Net++':
-            if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+            if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:
                 self.model = Nested_U_Net(in_channels, 1, deepsupervision=self.deep_supervision).to(self.device, non_blocking=True)
             elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                 self.model = Nested_U_Net(in_channels, 1, deepsupervision=self.deep_supervision).to(self.device, non_blocking=True)
@@ -774,12 +798,13 @@ class Extraction:
             self.scaler = GradScaler()
 
         # Data loader
-        if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+        if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:
             self.dataloader = Dataset_experiment_single.get_dataloader(
                 self.train_path_list, self.use_list, self.color, self.blend,
                 batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True,
                 use_rgb_balance=self.use_rgb_balance,
                 use_rgb_chromatic=self.use_rgb_chromatic,
+                use_balance_input_only=(self.experiment_subject in _SUBJECT_BALANCE_ONLY),
             )
         elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
             self.dataloader = Dataset_experiment_plus.get_dataloader(self.train_path_list, self.use_list, self.experiment_subject, self.color, self.blend, batch_size=self.batch_size, num_workers=2, isShuffle=True, pin_memory=True)
@@ -800,7 +825,7 @@ class Extraction:
             if self.roop_num > 2:
                 # Validation
                 img_path_list = self.pathological_specimen_folder_paths[self.val_num]
-                if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:
                     save_path = self.set_path(f'{self.save_image_path}val/exp{self.exp_num:04d}/val{self.val_num+1:02d}/epoch{epoch+1:02d}/')
                     self.save_image(img_path_list, save_path)
                 elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
@@ -813,7 +838,7 @@ class Extraction:
             
             # Test
             img_path_list = self.pathological_specimen_folder_paths[self.test_num]
-            if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+            if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:
                 save_path = self.set_path(f'{self.save_image_path}test/exp{self.exp_num:04d}/test{self.val_num+1:02d}/epoch{epoch+1:02d}/')
                 self.save_image(img_path_list, save_path)
             elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
@@ -862,11 +887,12 @@ class Extraction:
                 img_path_list.append(f'{img_path}/x/{img_name}.png')
 
             self.model.eval()
-            if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear' or self.experiment_subject == 'both':  
+            if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1 or self.experiment_subject == 'both':  
                 img = Dataset_experiment_single.get_image(
                     img_path_list, self.use_list, self.color, self.blend,
                     use_rgb_balance=self.use_rgb_balance,
                     use_rgb_chromatic=self.use_rgb_chromatic,
+                    use_balance_input_only=(self.experiment_subject in _SUBJECT_BALANCE_ONLY),
                 )
                 img = img.to(self.device)
             elif self.experiment_subject == 'nuclear+':
@@ -913,7 +939,7 @@ class Extraction:
                 pred = self.model(img)
                 if isinstance(pred, list):
                     pred = pred[-1]
-                if self.experiment_subject == 'membrane' or self.experiment_subject == 'nuclear':
+                if self.experiment_subject in _SUBJECT_SINGLE_NET_OUT1:
                     self.image_compression_save(pred, f'{save_path}{img_num}.png', divide=self.compress_rate)
                 elif self.experiment_subject == 'membrane+' or self.experiment_subject == 'nuclear+':
                     self.image_compression_save(pred, f'{save_path}{img_num}.png', divide=self.compress_rate)
@@ -989,6 +1015,7 @@ class Extraction:
             "in_channels": getattr(model_to_save, "in_channels", None),
             "use_rgb_balance": self.use_rgb_balance,
             "use_rgb_chromatic": self.use_rgb_chromatic,
+            "use_balance_input_only": self.experiment_subject in _SUBJECT_BALANCE_ONLY,
         }
 
         # ファイル名：どの実験・どの分割・何epochか分かるように
@@ -1026,6 +1053,29 @@ class Extraction:
             self.current_in_channels = in_channels
 
         in_channels = self.current_in_channels
+
+        if (
+            self.experiment_subject in _SUBJECT_BALANCE_ONLY
+            and self.use_list_length in (1, 3)
+            and sum(self.use_list) == 1
+            and img.shape[2] >= 3
+        ):
+            bgr_u8 = img[:, :, :3].astype(np.uint8)
+            b0, g0, r0 = rgb_balance_grayscale(bgr_u8)
+            bal_bgr = cv2.merge([b0, g0, r0])
+            if self.color == 'RGB':
+                part = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+            else:
+                part = cv2.cvtColor(bal_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+            if self.external_div255:
+                part /= 255.0
+            x = torch.from_numpy(part).permute(2, 0, 1)
+            if x.shape[0] < in_channels:
+                pad = torch.zeros((in_channels - x.shape[0], x.shape[1], x.shape[2]), dtype=x.dtype)
+                x = torch.cat([x, pad], dim=0)
+            elif x.shape[0] > in_channels:
+                x = x[:in_channels]
+            return x
 
         # 膜・核単独 + RGB 拡張チャンネル + 撮像法1成分 use_list のときは 1 枚の BGR から複数ブロックを構成
         if (
