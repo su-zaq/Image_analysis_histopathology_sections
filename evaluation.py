@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from VitLib import get_file_paths, get_file_stems, create_directory, evaluate_membrane_prediction_range, evaluate_nuclear_prediction_range, evaluate_membrane_prediction, evaluate_nuclear_prediction
+from roc_plot import plot_roc_from_images, plot_roc_from_image_pairs
 from send_info_discord import discord_info
 
 class Evaluation:
@@ -207,6 +208,9 @@ class SparseEvaluation:
         df = pd.DataFrame(result_dicts)
         df.to_csv(csv_path, index=False)
         self.logger.info(f'Saved {csv_path}')
+        save_evaluation_roc_plot(
+            pred_img, ans_img, img_path, subject, self.experiment_param, self.logger,
+        )
 
     def get_png_flies_without_csv(self, root_path:str) -> tuple:
         '''CSVのないPNGファイルを取得する。
@@ -417,6 +421,9 @@ class DenseEvaluation:
         df = pd.DataFrame(result_dicts)
         df.to_csv(csv_path, index=False)
         self.logger.info(f'Saved {csv_path}')
+        save_evaluation_roc_plot(
+            pred_img, ans_img, img_path, subject, self.experiment_param, self.logger,
+        )
 
     def get_png_flies_without_csv(self, root_path:str) -> tuple:
         '''CSVのないPNGファイルを取得する。
@@ -601,6 +608,7 @@ class EvaluationAggregation:
             result_dicts.append(result_dict)
         result_df = pd.DataFrame(result_dicts)
         result_df.to_csv(epoch_path + '/epoch_aggregate.csv', index=False)
+        self._save_epoch_roc_plot(epoch_path, csv_file_list, subject)
             
     def aggregate_validation_val_num(self, val_num_path:str, subject:str):
         """val_num毎の結果を集計する。
@@ -1000,6 +1008,70 @@ class EvaluationAggregation:
             if search_name in path:
                 return path
 
+    def _save_epoch_roc_plot(self, epoch_path: str, csv_file_list: list[str], subject: str) -> None:
+        if not self.experiment_param.get('plot_roc_curve', True):
+            return
+
+        image_pairs = []
+        for csv_file in csv_file_list:
+            pred_path = csv_path_to_pred_png_path(csv_file)
+            if not os.path.exists(pred_path):
+                self.logger.warning(f'ROC plot skipped (pred not found): {pred_path}')
+                continue
+            df = pd.read_csv(csv_file)
+            img_name = df['img_name'].unique()[0]
+            ans_path = self.select_ans_img_folder_path(img_name, self.ans_list) + f'/y_{subject}/ans.png'
+            pred_img = imread(pred_path, cv2.IMREAD_GRAYSCALE)
+            ans_img = imread(ans_path, cv2.IMREAD_GRAYSCALE)
+            if pred_img is None or ans_img is None:
+                self.logger.warning(f'ROC plot skipped (image read failed): {pred_path}')
+                continue
+            image_pairs.append((pred_img, ans_img))
+
+        if not image_pairs:
+            return
+
+        roc_path = epoch_path + '/epoch_roc.png'
+        title = f'{subject} ROC ({os.path.basename(epoch_path)})'
+        if plot_roc_from_image_pairs(image_pairs, roc_path, title=title):
+            self.logger.info(f'Saved {roc_path}')
+        else:
+            self.logger.warning(f'ROC plot skipped (no valid pixels): {roc_path}')
+
+
+def csv_path_to_pred_png_path(csv_path: str) -> str:
+    """評価 CSV のパスから対応する推論 PNG のパスを得る。"""
+    return (
+        csv_path.replace('.csv', '.png')
+        .replace('log_eval_membrane', 'eval_data_membrane')
+        .replace('log_eval_nuclear', 'eval_data_nuclear')
+    )
+
+
+def save_evaluation_roc_plot(
+    pred_img: np.ndarray,
+    ans_img: np.ndarray,
+    img_path: str,
+    subject: str,
+    experiment_param: dict,
+    logger: Logger,
+) -> None:
+    """推論の連続値から画像単位の ROC 曲線を保存する。"""
+    if not experiment_param.get('plot_roc_curve', True):
+        return
+
+    roc_path = (
+        img_path.replace('.png', '_roc.png')
+        .replace('eval_data_membrane', 'log_eval_membrane')
+        .replace('eval_data_nuclear', 'log_eval_nuclear')
+    )
+    title = f'{subject} ROC ({os.path.basename(img_path)})'
+    if plot_roc_from_images(pred_img, ans_img, roc_path, title=title):
+        logger.info(f'Saved {roc_path}')
+    else:
+        logger.warning(f'ROC plot skipped (no valid pixels): {roc_path}')
+
+
 def get_ans_img_folder_path(path:str) -> list:
     """指定したパス以下のansフォルダのパスを取得する。
     
@@ -1078,8 +1150,14 @@ if __name__ == "__main__":
     # 実験対象
     experiment_subject = EXPERIMENT_PARAM.get('experiment_subject', 'membrane')
 
+    def _cfg_bool(section, key: str, default: bool = False) -> bool:
+        if hasattr(section, 'getboolean'):
+            return section.getboolean(key, fallback=default)
+        return default
+
     # 評価パラメータ
     experiment_param = {
+        'plot_roc_curve': _cfg_bool(EVALIATION_PARAM, 'plot_roc_curve', True),
         'num_epochs': int(EXPERIMENT_PARAM.get('num_epochs', 40)),
         'care_rate': float(EXPERIMENT_PATH.get('care_rate', 75)),
         'lower_ratio': float(EXPERIMENT_PATH.get('lower_ratio', 17)),
