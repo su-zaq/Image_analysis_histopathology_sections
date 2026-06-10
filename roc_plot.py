@@ -44,7 +44,7 @@ def compute_pixel_roc(
 
     tpr = np.concatenate(([0.0], tp / positive_count))
     fpr = np.concatenate(([0.0], fp / negative_count))
-    auc = float(np.trapz(tpr, fpr))
+    auc = float(np.trapezoid(tpr, fpr))
     return fpr, tpr, auc
 
 
@@ -133,6 +133,6 @@ def plot_roc_from_image_pairs(
     fp = np.cumsum(1 - labels_sorted)
     tpr = np.concatenate(([0.0], tp / positive_count))
     fpr = np.concatenate(([0.0], fp / negative_count))
-    auc = float(np.trapz(tpr, fpr))
+    auc = float(np.trapezoid(tpr, fpr))
     save_roc_curve_plot(fpr, tpr, auc, save_path, title=title)
     return True
